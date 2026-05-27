@@ -1,160 +1,254 @@
-# python-template
+# tfex-s50-multi-tf-swing
 
-> Universal Python project template — uv-native, Docker-ready, AI-agent enabled.
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![uv](https://img.shields.io/badge/managed%20by-uv-purple)](https://docs.astral.sh/uv/)
+[![Type Safety](https://img.shields.io/badge/type%20safety-mypy%20strict-green)](pyproject.toml)
+[![Docker](https://img.shields.io/badge/docker-ready-blue)](Dockerfile)
 
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
-[![Docker Publish](https://github.com/OWNER/REPO/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/docker-publish.yml)
-[![Security Scan](https://github.com/OWNER/REPO/actions/workflows/security.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/security.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+โครงการนี้ใช้กลยุทธ์ Multi-Timeframe Swing-Intraday บน **SET50 Index Futures (S50)** ของ TFEX
+โดยแยกชั้นเวลาเป็น 4H (regime), 1H (setup), และ 5m (execution) เพื่อหา setup ที่ expectancy
+สูง ภายใต้กรอบ regime + risk management ที่เคร่งครัด
 
-A fork-ready Python project template with dependency management via [uv](https://docs.astral.sh/uv/),
-Docker support for containerized execution, CI/CD workflows, and a `.claude/`
-directory that AI coding agents use for project context and standards.
+**Multi-timeframe swing-intraday quant system for TFEX SET50 Index Futures (S50).**
+Headless data engine that reports daily snapshots to the umbrella `quant-api-gateway`
+under the standard ingestion contract.
 
-## Features
+---
 
-- **uv-native** — single `pyproject.toml` as the source of truth.
-- **Docker** — multi-stage build with `uv`, Python 3.11-slim, ready to deploy.
-- **Type-safe** — `mypy --strict` on all source and test code.
-- **Linted & formatted** — `ruff` with E, F, I, UP, B, SIM rules.
-- **≥80% coverage** — `pytest` + `pytest-asyncio` + `pytest-cov` enforced in CI.
-- **Security scanning** — weekly `bandit` and `pip-audit` runs.
-- **Pre-commit hooks** — ruff-check, ruff-format, mypy on every commit.
-- **AI agent ready** — `.claude/` directory with knowledge, playbooks, and prompt
-  engineering guidance.
+> **⚠️ Disclaimer**
+>
+> โปรเจกต์นี้จัดทำขึ้นเพื่อการศึกษาเท่านั้น ไม่ถือเป็นคำแนะนำการลงทุนในทุกกรณี
+> ผลการทดสอบย้อนหลัง (backtest) ไม่ได้รับประกันผลตอบแทนในอนาคต โดยเฉพาะอย่างยิ่งใน
+> ตลาดอนุพันธ์ (TFEX) ที่มี leverage สูง การขาดทุนเกินทุนตั้งต้นเป็นไปได้
+> ผู้พัฒนาไม่รับผิดชอบต่อความเสียหายหรือผลกำไรขาดทุนใดๆ ที่เกิดจากการนำโปรเจกต์นี้ไปใช้งาน
+>
+> **This project is for educational purposes only. It does not constitute investment
+> advice. Futures trading on TFEX uses leverage; losses can exceed initial capital.
+> Past backtest results do not guarantee future returns. The developer assumes no
+> responsibility for any losses arising from use of this project.**
 
-## Directory structure
+---
+
+## Table of Contents
+
+- [What this project does](#what-this-project-does)
+- [Why start from S50](#why-start-from-s50)
+- [Architecture](#architecture)
+- [Project status](#project-status)
+- [Quick start](#quick-start)
+- [Configuration reference](#configuration-reference)
+- [Stack](#stack)
+- [Project structure](#project-structure)
+- [Development](#development)
+- [Hard rules](#hard-rules)
+- [References](#references)
+- [License](#license)
+
+---
+
+## What this project does
+
+- **Multi-timeframe pipeline**: 4H regime + bias → 1H setup detection → 5m execution.
+- **Three core strategies**:
+  - A — Pullback Continuation (primary)
+  - B — Opening Range Breakout
+  - C — Liquidity Sweep Reversal
+- **Regime-aware**: classifies bars into `trend_up`, `trend_down`, `range_low_vol`,
+  `range_high_vol`, `panic` and turns strategies on or off accordingly. "No trade"
+  is a feature.
+- **ML probability filter**: LightGBM gates rule-based signals via
+  `P(trend_continuation)` and `P(fake_breakout)`. ML is a filter, not an oracle.
+- **Risk engine first**: ATR-scaled position sizing, daily loss limit, volatility
+  scaling, kill switch.
+- **Reports to gateway** via the umbrella's `POST /api/v1/ingest/daily-report`
+  contract, mirroring the `csm-set` pattern.
+
+## Why start from S50
+
+The hardest problem in quant trading is not "finding markets to trade" but
+**managing complexity**. Starting from a single instrument is the hedge-fund path:
+single market → single instrument → single strategy. S50 is the right place to start
+on TFEX because behaviour patterns (opening volatility, lunch slowdown, gap fill,
+foreign flow) are stable, liquidity is adequate, and the research cycle is fast.
+
+The system is engineered to **survive across regimes**, not to look pretty in a
+backtest. Edge comes from regime awareness + cost efficiency + risk management +
+execution quality — not from a secret indicator.
+
+## Architecture
+
+Five layers, top-down:
+
+```
+┌──────────────────────────────────────────────┐
+│  Raw Market Data (multi-TF OHLCV)             │
+│  4H → Regime / Macro Bias                     │
+│  1H → Main Setup Detection                    │
+│  5m → Execution & Risk Optimisation           │
+├──────────────────────────────────────────────┤
+│  Data Layer                                   │
+│  Continuous Futures · Features · Validation   │
+├──────────────────────────────────────────────┤
+│  Intelligence Layer                           │
+│  Regime · HTF Bias · ML Probability Filter    │
+├──────────────────────────────────────────────┤
+│  Execution Layer                              │
+│  Setups (A/B/C) · 5m Execution · Risk Engine  │
+├──────────────────────────────────────────────┤
+│  Validation & Deployment                      │
+│  Walk-Forward · Paper · Live                  │
+└──────────────────────────────────────────────┘
+```
+
+Reporting follows the umbrella's contract: daily snapshots POST to
+`quant-api-gateway`, which aggregates with other strategies (e.g. `csm-set`) and
+serves the unified surface to OpenBB.
+
+## Project status
+
+| Phase | Status |
+| --- | --- |
+| 0 — Project Bootstrap & Gateway Onboarding | **In progress** |
+| 1 — Data Infrastructure | Not started |
+| 2 — Feature Engineering | Not started |
+| 3 — Regime Detection | Not started |
+| 4 — Higher-TF Bias Engine | Not started |
+| 5 — Setup Detection & Signals | Not started |
+| 6 — ML Probability Filter | Not started |
+| 7 — Risk Engine | Not started |
+| 8 — Walk-Forward Backtest | Not started |
+| 9 — Paper Trading | Not started |
+| 10 — Live Deployment | Not started |
+| 11 — Adaptive Evolution | Future |
+
+Full plan, exit criteria, and dependencies live in
+[`docs/plans/ROADMAP.md`](docs/plans/ROADMAP.md).
+
+## Quick start
+
+Prerequisites: Python 3.11+, [uv](https://docs.astral.sh/uv/), Docker (optional but
+recommended).
+
+```bash
+git clone https://github.com/lumduan/tfex-s50-multi-tf-swing
+cd tfex-s50-multi-tf-swing
+
+# Install all dependencies
+uv sync --all-groups
+
+# Run quality gates (mirrors CI)
+uv run ruff check . \
+  && uv run ruff format --check . \
+  && uv run mypy src tests \
+  && uv run pytest
+```
+
+Once Phase 0 is complete, the service will be launchable via Docker (public mode by
+default, host port 8200):
+
+```bash
+docker compose up
+```
+
+## Configuration reference
+
+Environment variables (prefix `TFEX_S50_MULTI_TF_SWING_*`, loaded via
+`pydantic-settings`):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE` | `true` | Read-only mode; flips off scheduler and writes. |
+| `TFEX_S50_MULTI_TF_SWING_DB_WRITE_ENABLED` | `false` | Whether to mirror to Postgres. |
+| `TFEX_S50_MULTI_TF_SWING_DB_TFEX_S50_MULTI_TF_SWING_DSN` | — | DSN for `db_tfex_s50_multi_tf_swing` |
+| `TFEX_S50_MULTI_TF_SWING_GATEWAY_BASE_URL` | `http://quant-api-gateway:8000` | Umbrella gateway base URL. |
+| `TFEX_S50_MULTI_TF_SWING_GATEWAY_API_KEY` | — | Shared key for ingestion auth. |
+
+Never commit a real `.env` — copy `.env.example` and fill values locally.
+
+## Stack
+
+- **Python 3.11+** with `uv` for dependency management.
+- **Polars** / **DuckDB** for in-memory and on-disk analytics.
+- **PyArrow / Parquet** as the durable tabular store.
+- **LightGBM** for the ML probability filter (XGBoost / CatBoost as alternates).
+- **FastAPI** for the headless service surface (Phase 0+).
+- **Pydantic v2** at every boundary.
+- **Docker** with multi-stage builds, joining the external `quant-network`.
+
+## Project structure
 
 ```
 .
 ├── .claude/                       # AI agent context & playbooks
-│   ├── knowledge/project-skill.md # Master rules for all code
-│   ├── playbooks/                 # Step-by-step workflow guides
-│   └── prompts/                   # Prompt engineering instructions
-├── .github/                       # CI/CD, issue/PR templates
-│   ├── workflows/                 # ci.yml, docker-publish.yml, security.yml
-│   ├── ISSUE_TEMPLATE/
-│   ├── PULL_REQUEST_TEMPLATE.md
-│   └── FUNDING.yml
-├── src/                           # Application source
-│   └── main.py                    # Entrypoint
-├── tests/                         # Test suite
-├── docs/                          # Documentation
-├── Dockerfile                     # Multi-stage container build
-├── pyproject.toml                 # uv project config + tool settings
-├── uv.lock                        # Locked dependency versions
-├── .pre-commit-config.yaml
-├── .env.example
-├── CHANGELOG.md
-├── CODE_OF_CONDUCT.md
-├── CONTRIBUTING.md
-├── LICENSE
-└── SECURITY.md
+│   ├── knowledge/                 # Strategy overview, features, regimes, etc.
+│   ├── playbooks/                 # Dev workflow, gateway onboarding
+│   ├── memory/                    # Local memory index
+│   ├── agents/                    # (reserved)
+│   └── templates/                 # (reserved)
+├── .github/                       # CI/CD, issue & PR templates
+│   └── workflows/                 # ci.yml, docker-publish.yml, security.yml
+├── docs/
+│   ├── overview.md
+│   └── plans/
+│       └── ROADMAP.md             # Canonical phase plan
+├── src/
+│   └── tfex_s50_multi_tf_swing/   # (to be populated in Phase 1+)
+├── tests/                         # unit + integration
+├── data/                          # (gitignored) raw / cleaned / continuous / features / labels
+├── results/                       # (committed) public-safe summaries
+├── Dockerfile
+├── docker-compose.yml
+├── docker-compose.private.yml     # (Phase 0)
+├── pyproject.toml
+├── uv.lock
+├── CLAUDE.md                      # Agent guide
+└── README.md
 ```
 
-## Prerequisites
+## Development
 
-- Python 3.11 or 3.12
-- [uv](https://docs.astral.sh/uv/) (install with `curl -LsSf https://astral.sh/uv/install.sh | sh`)
-
-## Installation
+Always use `uv` — never bare `python` / `pip` / `poetry` / `conda`.
 
 ```bash
-git clone https://github.com/OWNER/REPO.git
-cd REPO
-
-# Install all dependencies (dev group included by default)
 uv sync --all-groups
+uv run ruff check . --fix
+uv run ruff format .
+uv run mypy src tests
+uv run pytest --cov=src --cov-report=term-missing
+```
 
-# Install pre-commit hooks
+Pre-commit hooks (`ruff-check`, `ruff-format`, `mypy`) install via:
+
+```bash
 uv run pre-commit install
 ```
 
-## Running locally
+Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `chore:`, `refactor:`.
 
-```bash
-uv run python -m src.main
-# Output: hello from python-template
-```
+## Hard rules
 
-## Running with Docker
+The non-negotiable rules for this project:
 
-```bash
-# Build
-docker build -t python-template:dev .
+1. **Position sizing in contracts.** S50 multiplier = 200 THB per index point.
+2. **No averaging down.** A losing trade is a wrong idea.
+3. **Regime gates trading.** `range_low_vol` and the 12:00–14:00 lunch dead zone
+   are no-trade.
+4. **Walk-forward only.** No random splits, ever.
+5. **ML is a filter, not a strategy.**
+6. **Decimals as strings** across the gateway boundary; never `float`.
+7. **Timezones tz-aware UTC** at storage, `Asia/Bangkok` at display.
+8. **No secrets in repo** — `.env` is local and gitignored.
 
-# Run
-docker run --rm python-template:dev
-# Output: hello from python-template
-```
+Full rationale in [`CLAUDE.md`](CLAUDE.md) and the `.claude/knowledge/` files.
 
-## Testing
+## References
 
-```bash
-# Run all tests
-uv run pytest
-
-# With verbosity and coverage
-uv run pytest -v --cov=src --cov-report=term-missing
-```
-
-Coverage must stay ≥80%. The threshold is enforced in CI and in `pyproject.toml`
-(`tool.pytest.ini_options.addopts`).
-
-## Linting, formatting, and type checking
-
-```bash
-uv run ruff check .               # Lint
-uv run ruff format --check .      # Format check (passive)
-uv run ruff format .              # Auto-format (apply)
-uv run mypy src tests             # Type check
-```
-
-Run all quality gates together:
-
-```bash
-uv run ruff check . && uv run ruff format --check . && uv run mypy src tests && uv run pytest
-```
-
-## Using `.claude/` for AI agent workflows
-
-This project is designed to work with AI coding agents like Claude Code.
-The `.claude/` directory provides agents with project context and enforceable
-standards:
-
-| File | Purpose |
-|------|---------|
-| `.claude/knowledge/project-skill.md` | **Start here.** Hard rules, soft conventions, and quality gates. Agents load this first. |
-| `.claude/playbooks/feature-development.md` | Repeatable 8-step workflow: read → design → test-first → implement → quality gate → document → commit → verify. |
-| `.claude/prompts/Prompt-Engineer.prompt.md` | How to write effective prompts for AI agents on this project. Includes good and bad examples. |
-
-When you open this repo in Claude Code (or any agent that reads `.claude/`),
-the agent will automatically pick up these files. You can also ask it explicitly:
-> *"Read `.claude/knowledge/project-skill.md` and then follow
-> `.claude/playbooks/feature-development.md` to add a new feature."*
-
-## Security scanning
-
-```bash
-# Static analysis for common Python security issues
-uv run bandit -r src
-
-# Check dependencies for known CVEs
-uv run pip-audit
-```
-
-Both run automatically on a weekly CI schedule (`.github/workflows/security.yml`).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide,
-conventional commit format, and quality gate expectations. Pull requests are
-welcome — use the PR template to provide context.
-
-## Security
-
-Report vulnerabilities privately to **bad.sonsuk@gmail.com** rather than
-opening a public issue. See [SECURITY.md](SECURITY.md) for the full policy.
+- Umbrella system map — [`../../CLAUDE.md`](../../CLAUDE.md)
+- Strategy onboarding contract — [`../../STRATEGY_ONBOARDING.md`](../../STRATEGY_ONBOARDING.md)
+- Template / reference strategy — [`../csm-set/`](../csm-set/)
+- Project agent guide — [`CLAUDE.md`](CLAUDE.md)
+- Phase plan — [`docs/plans/ROADMAP.md`](docs/plans/ROADMAP.md)
 
 ## License
 
