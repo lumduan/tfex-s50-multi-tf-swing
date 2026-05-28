@@ -590,4 +590,11 @@ only. TFEX is present in the loaded registry but correctly hidden until
 
 ### PR URLs
 
-_Filled in after Step H (commit + PR opens)._
+Merge order: **infra-db → gateway → strategy → umbrella docs**.
+
+| Repo | PR | Title |
+| --- | --- | --- |
+| `quant-infra-db` | [#8](https://github.com/lumduan/quant-infra-db/pull/8) | feat: add tfex-s50-multi-tf-swing schema |
+| `quant-api-gateway` | [#19](https://github.com/lumduan/quant-api-gateway/pull/19) | feat: register tfex-s50-multi-tf-swing strategy |
+| `tfex-s50-multi-tf-swing` | [#2](https://github.com/lumduan/tfex-s50-multi-tf-swing/pull/2) | feat: phase 0 bootstrap & gateway onboarding |
+| `quant-trading-system` (umbrella) | [#16](https://github.com/lumduan/quant-trading-system/pull/16) | docs: tfex-s50-multi-tf-swing phase 0 complete |
