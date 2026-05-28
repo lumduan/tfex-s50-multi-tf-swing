@@ -1,0 +1,14 @@
+# Owner-mode overlay. Compose with:
+#   docker compose -f docker-compose.yml -f docker-compose.private.yml up -d
+# Mounts data/ + results/ writable, loads broker / gateway secrets from .env,
+# and flips PUBLIC_MODE off so write paths (data refresh, backtest run, daily
+# report POST) are enabled.
+
+services:
+  tfex:
+    env_file: .env
+    environment:
+      TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE: "false"
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results

@@ -1,0 +1,22 @@
+services:
+  tfex:
+    build: .
+    container_name: quant-tfex-s50-multi-tf-swing
+    ports:
+      - "8200:8000"
+    environment:
+      TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE: "true"
+      TFEX_S50_MULTI_TF_SWING_DB_WRITE_ENABLED: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: 1g
+    restart: unless-stopped
+
+networks:
+  default:
+    name: quant-network
+    external: true

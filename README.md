@@ -109,7 +109,7 @@ serves the unified surface to OpenBB.
 
 | Phase | Status |
 | --- | --- |
-| 0 — Project Bootstrap & Gateway Onboarding | **In progress** |
+| 0 — Project Bootstrap & Gateway Onboarding | **Complete** (2026-05-28) |
 | 1 — Data Infrastructure | Not started |
 | 2 — Feature Engineering | Not started |
 | 3 — Regime Detection | Not started |
@@ -144,11 +144,14 @@ uv run ruff check . \
   && uv run pytest
 ```
 
-Once Phase 0 is complete, the service will be launchable via Docker (public mode by
-default, host port 8200):
+Phase 0 is complete — the service is launchable via Docker (public mode by
+default, host port `:8200`, joins the umbrella `quant-network`):
 
 ```bash
-docker compose up
+docker compose up -d                                            # public mode
+docker compose -f docker-compose.yml -f docker-compose.private.yml up -d   # owner mode
+curl http://localhost:8200/health
+# → {"status":"ok","service":"tfex-s50-multi-tf-swing","version":"0.1.0"}
 ```
 
 ## Configuration reference
@@ -160,7 +163,7 @@ Environment variables (prefix `TFEX_S50_MULTI_TF_SWING_*`, loaded via
 | --- | --- | --- |
 | `TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE` | `true` | Read-only mode; flips off scheduler and writes. |
 | `TFEX_S50_MULTI_TF_SWING_DB_WRITE_ENABLED` | `false` | Whether to mirror to Postgres. |
-| `TFEX_S50_MULTI_TF_SWING_DB_TFEX_S50_MULTI_TF_SWING_DSN` | — | DSN for `db_tfex_s50_multi_tf_swing` |
+| `TFEX_S50_MULTI_TF_SWING_PG_DSN` | — | DSN for `db_tfex_s50_multi_tf_swing` (required when `DB_WRITE_ENABLED=true`). |
 | `TFEX_S50_MULTI_TF_SWING_GATEWAY_BASE_URL` | `http://quant-api-gateway:8000` | Umbrella gateway base URL. |
 | `TFEX_S50_MULTI_TF_SWING_GATEWAY_API_KEY` | — | Shared key for ingestion auth. |
 
