@@ -481,6 +481,113 @@ Conventional Commits per repo; PR bodies link the other three and state merge or
 
 ## Completion Notes
 
-_To be filled in after Step F passes. Will record: status codes, response bodies
-(no secrets), schema verification output, four PR URLs, any deviations encountered
-during execution._
+**Verified 2026-05-28** — end-to-end Step F complete; all four sub-phase
+exit criteria green.
+
+### Schema application
+
+```
+$ docker exec -i quant-postgres psql -U postgres \
+    -f /docker-entrypoint-initdb.d/08_schema_db_tfex_s50_multi_tf_swing.sql
+CREATE DATABASE
+You are now connected to database "db_tfex_s50_multi_tf_swing" as user "postgres".
+CREATE EXTENSION
+CREATE TABLE
+     create_hypertable     
+---------------------------
+ (1,public,equity_curve,t)
+CREATE INDEX (x2)
+CREATE TABLE (trade_history)
+CREATE INDEX (x2)
+CREATE TABLE (backtest_log)
+CREATE INDEX
+CREATE TABLE
+          create_hypertable          
+-------------------------------------
+ (2,public,benchmark_equity_curve,t)
+CREATE INDEX (x2)
+
+$ docker exec quant-postgres psql -U postgres -d db_tfex_s50_multi_tf_swing -c "\dt"
+                 List of relations
+ Schema |          Name          | Type  |  Owner   
+--------+------------------------+-------+----------
+ public | backtest_log           | table | postgres
+ public | benchmark_equity_curve | table | postgres
+ public | equity_curve           | table | postgres
+ public | trade_history          | table | postgres
+(4 rows)
+```
+
+### HTTP round-trip
+
+Gateway is published on host `:8080` (not `:8000` — `API_GATEWAY_HOST_PORT`
+override in the gateway `.env` because the host's `:8000` is taken by an
+unrelated service). Status codes and bodies captured below; the
+`INTERNAL_API_KEY` value is intentionally not echoed.
+
+```
+$ curl -s -o - -w "\n%{http_code}\n" http://localhost:8200/health
+{"status":"ok","service":"tfex-s50-multi-tf-swing","version":"0.1.0"}
+200
+
+$ curl -s -o - -w "\n%{http_code}\n" http://localhost:8080/api/v2/engines/catalog
+[{"slug":"market-data","type":"EXTERNAL","status":"active",...},
+ {"slug":"backtest","type":"EXTERNAL","status":"active",...},
+ {"slug":"portfolio","type":"INTERNAL","status":"active",...},
+ {"slug":"signals","type":"EXTERNAL","status":"dormant",...}]
+200
+
+$ curl -s -o - -w "\n%{http_code}\n" -X POST \
+    http://localhost:8080/api/v1/ingest/daily-report \
+    -H "X-API-Key: <redacted>" -H "Content-Type: application/json" \
+    -d @/tmp/tfex_min_payload.json
+{"status":"accepted","strategy_id":"tfex-s50-multi-tf-swing","time":"2026-05-28T00:00:00+00:00"}
+201
+
+# repeat — idempotent on (strategy_id, time):
+{"status":"accepted","strategy_id":"tfex-s50-multi-tf-swing","time":"2026-05-28T00:00:00+00:00"}
+201
+```
+
+### Idempotency proof
+
+```
+$ docker exec quant-postgres psql -U postgres -d db_gateway \
+    -c "SELECT strategy_id, COUNT(*) FROM daily_performance \
+        WHERE strategy_id = 'tfex-s50-multi-tf-swing' GROUP BY strategy_id;"
+       strategy_id       | count 
+-------------------------+-------
+ tfex-s50-multi-tf-swing |     1
+(1 row)
+```
+
+Exactly **one** row from **two** consecutive POSTs — gateway's
+`INSERT … ON CONFLICT (strategy_id, last_updated)` is doing its job.
+
+### Gateway registry
+
+`GET /api/v1/strategies` returns only active strategies, so it shows csm-set
+only. TFEX is present in the loaded registry but correctly hidden until
+`active` flips to `true` in a later phase (gated on Phase 10 paper-trading).
+
+### Deviations from the original plan
+
+1. **Gateway rebuild was required** for end-to-end POST verification.
+   `strategies.json` is baked into the gateway image at build time (not
+   bind-mounted), so the running container had only csm-set in its loaded
+   registry. After `docker compose up -d --build` in `quant-api-gateway`,
+   the TFEX POST succeeded. The rebuild is non-destructive (Postgres data
+   and Redis cache live in volumes that survive the rebuild) but worth
+   flagging — every future strategy-registration PR will need the same
+   gateway rebuild step in its verification.
+2. Plan-document originally said gateway is on host `:8000`; actual host
+   port is `:8080` per `API_GATEWAY_HOST_PORT` in the gateway's `.env`.
+   The verification curls + this notes section reflect the real port.
+3. Original prompt allowed tenacity for the retry loop. Switched to a
+   manual `for attempt in range(...)` loop with `asyncio.sleep` to mirror
+   csm-set's existing `gateway_client.py` verbatim — both strategy adapters
+   now share identical retry semantics.
+
+### PR URLs
+
+_Filled in after Step H (commit + PR opens)._

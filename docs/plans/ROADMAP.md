@@ -28,11 +28,11 @@ before the next begins. The goal is a **robust live system, not a beautiful back
 - [x] GitHub repo created and renamed to `lumduan/tfex-s50-multi-tf-swing`
 - [x] Local skeleton synced from the Python template (uv, ruff, mypy strict, pytest)
 - [x] Initial feature branch `feat/initial-roadmap-and-agent-context`
-- [ ] Personalise `pyproject.toml`: name `tfex-s50-multi-tf-swing`, description, package
+- [x] Personalise `pyproject.toml`: name `tfex-s50-multi-tf-swing`, description, package
   path `src/tfex_s50_multi_tf_swing/`
-- [ ] `.env.example` with strategy env prefix `TFEX_S50_MULTI_TF_SWING_*`
-- [ ] Pre-commit hooks active (`ruff check`, `ruff format`, `mypy`)
-- [ ] Verify quality gates on empty project: `uv run ruff check . && uv run ruff format --check . && uv run mypy src tests && uv run pytest`
+- [x] `.env.example` with strategy env prefix `TFEX_S50_MULTI_TF_SWING_*`
+- [x] Pre-commit hooks active (`ruff check`, `ruff format`, `mypy`)
+- [x] Verify quality gates on empty project: `uv run ruff check . && uv run ruff format --check . && uv run mypy src tests && uv run pytest`
 
 ### 0.2 Roadmap & Agent Context
 
@@ -45,7 +45,7 @@ before the next begins. The goal is a **robust live system, not a beautiful back
 
 ### 0.3 Gateway & DB Registration
 
-- [ ] Add gateway entry in `quant-api-gateway/strategies.json`:
+- [x] Add gateway entry in `quant-api-gateway/strategies.json`:
   ```json
   {
     "id": "tfex-s50-multi-tf-swing",
@@ -56,27 +56,27 @@ before the next begins. The goal is a **robust live system, not a beautiful back
     "active": false
   }
   ```
-- [ ] Database init script in `quant-infra-db/init-scripts/0X_schema_db_tfex_s50_multi_tf_swing.sql`:
-  - [ ] `equity_curve` (TimescaleDB hypertable)
-  - [ ] `trade_history` (with `side`, `contracts`, `margin_used`)
-  - [ ] `backtest_log`
-  - [ ] `benchmark_equity_curve` (S50 underlying / SET50 TR)
-- [ ] Reserve host port `:8200` to avoid collision with csm-set (`:8100`) and OpenBB (`:8500`)
+- [x] Database init script in `quant-infra-db/init-scripts/08_schema_db_tfex_s50_multi_tf_swing.sql`:
+  - [x] `equity_curve` (TimescaleDB hypertable)
+  - [x] `trade_history` (with `side`, `contracts`, `margin_used`)
+  - [x] `backtest_log`
+  - [x] `benchmark_equity_curve` (S50 underlying / SET50 TR)
+- [x] Reserve host port `:8200` to avoid collision with csm-set (`:8100`) and OpenBB (`:8500`)
 
 ### 0.4 Adapter Scaffolding
 
-- [ ] `src/tfex_s50_multi_tf_swing/adapters/payload.py` — Pydantic builder for
+- [x] `src/tfex_s50_multi_tf_swing/adapters/payload.py` — Pydantic builder for
   `POST /api/v1/ingest/daily-report` (decimal-as-string, UTC tz-aware)
-- [ ] `src/tfex_s50_multi_tf_swing/adapters/gateway_client.py` — async `httpx.AsyncClient`
+- [x] `src/tfex_s50_multi_tf_swing/adapters/gateway_client.py` — async `httpx.AsyncClient`
   with retry and idempotency
-- [ ] `src/tfex_s50_multi_tf_swing/adapters/hooks.py` — `run_post_refresh_hook` entrypoint
-- [ ] Unit tests on adapter modules (≥90% coverage)
+- [x] `src/tfex_s50_multi_tf_swing/adapters/hooks.py` — `run_post_refresh_hook` entrypoint
+- [x] Unit tests on adapter modules (≥90% coverage; achieved 99.42%)
 
 ### 0.5 Docker
 
-- [ ] `docker-compose.yml` — public-safe defaults, joins external `quant-network`
-- [ ] `docker-compose.private.yml` — write-mode override with `env_file`
-- [ ] `Dockerfile` parameterised on `TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE`
+- [x] `docker-compose.yml` — public-safe defaults, joins external `quant-network`
+- [x] `docker-compose.private.yml` — write-mode override with `env_file`
+- [x] `Dockerfile` parameterised on `TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE`
 
 **Exit criteria:** `docker compose up` starts the service on `quant-network`, gateway
 catalog lists the new strategy, an empty daily-report POST round-trips with `202`,
@@ -572,11 +572,13 @@ the calendar consumed by paper trading rather than coding.
 
 > Update this section as phases complete.
 
-- **Active phase:** Phase 0 — Project Bootstrap & Gateway Onboarding
-- **Completed sub-phases:** 0.1 (repo + tooling) and 0.2 (roadmap + agent context)
-  as of 2026-05-27.
-- **Blocked by:** nothing. Next: Phase 0.3 (gateway / DB registration) requires
-  coordinated PRs in `quant-api-gateway` and `quant-infra-db`.
+- **Active phase:** Phase 1 — Data Infrastructure (Phase 0 complete).
+- **Completed sub-phases:** 0.1 (repo + tooling), 0.2 (roadmap + agent context),
+  0.3 (gateway + DB registration), 0.4 (adapter scaffolding), 0.5 (Docker) all
+  complete as of 2026-05-28. End-to-end verification round-trip green; idempotent
+  POST proven (2 POSTs → 1 row in `db_gateway.daily_performance`).
+- **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
+- **Blocked by:** nothing. Next: Phase 1.1 (OHLCV ingestion).
 
 ---
 
