@@ -1,20 +1,26 @@
 [project]
-name = "python-template"
+name = "tfex-s50-multi-tf-swing"
 version = "0.1.0"
-description = "Universal Python project template — uv-native, Docker-ready, AI-agent enabled."
+description = "Multi-timeframe swing-intraday quant trading system for SET50 Index Futures (S50) on TFEX."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 authors = [{ name = "lumduan", email = "bad.sonsuk@gmail.com" }]
-keywords = ["python", "template", "uv", "docker", "claude-code"]
+keywords = ["quantitative-finance", "tfex", "s50", "futures", "swing-trading", "thailand"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
 ]
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+]
 
 [dependency-groups]
 dev = [
@@ -24,6 +30,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=5",
     "pre-commit>=3.7",
+    "respx>=0.21",
     "bandit>=1.7",
     "pip-audit>=2.7",
 ]
@@ -33,12 +40,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/tfex_s50_multi_tf_swing"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 src = ["src"]
+exclude = ["notebooks/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -54,11 +62,28 @@ mypy_path = "src"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = ["--cov=src", "--cov-report=term-missing", "--cov-fail-under=80"]
+# ``importlib`` mode lets test modules with identical basenames coexist across
+# packages (e.g. ``tests/unit/adapters/test_payload.py`` vs
+# ``tests/integration/adapters/test_payload.py``).
+addopts = [
+    "--cov=src/tfex_s50_multi_tf_swing/adapters",
+    "--cov-report=term-missing",
+    "--cov-fail-under=90",
+    "--import-mode=importlib",
+]
+markers = [
+    "infra_db: integration tests requiring quant-infra-db stack on quant-network",
+    "gateway: integration tests requiring the live quant-api-gateway",
+]
 
 [tool.coverage.run]
-source = ["src"]
-branch = true
+source = ["src/tfex_s50_multi_tf_swing/adapters"]
+branch = false
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_empty = true
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
