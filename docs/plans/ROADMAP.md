@@ -89,51 +89,69 @@ all quality gates pass.
 > Goal: clean, validated OHLCV at 4H / 1H / 5m for S50 futures, stored as Parquet,
 > with a back-adjusted continuous contract that survives quarterly rollovers.
 
+> **Status:** code complete on `feature/phase-1-data-infrastructure` (2026-05-28); 5-year backfill
+> + visual rollover review pending a real TradingView session token. See
+> [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md) for the full plan.
+
 ### 1.1 OHLCV Ingestion
 
-- [ ] `src/tfex_s50_multi_tf_swing/data/fetcher.py` — TFEX S50 OHLCV loader at 4H, 1H, 5m
-  - [ ] Source via `tvkit` (TradingView) or TFEX direct feed
-  - [ ] Async batch fetch, retry on transient errors
-- [ ] Storage layout:
-  - [ ] `data/raw/<contract>/<timeframe>.parquet` (per quarterly contract — H/M/U/Z)
-  - [ ] `data/cleaned/<contract>/<timeframe>.parquet`
-  - [ ] `data/continuous/<timeframe>.parquet` (back-adjusted)
-  - [ ] `data/features/<timeframe>.parquet`
-  - [ ] `data/labels/<timeframe>.parquet`
+- [x] `src/tfex_s50_multi_tf_swing/data/fetcher.py` — TFEX S50 OHLCV loader at 4H, 1H, 5m
+  - [x] Source via `tvkit` (TradingView). TFEX direct feed deferred; see Phase 1 plan §8.
+  - [x] Async batch fetch, retry on transient errors
+- [x] Storage layout:
+  - [x] `data/raw/<contract>/<timeframe>.parquet` (per quarterly contract — H/M/U/Z)
+  - [x] `data/cleaned/<contract>/<timeframe>.parquet` (path reserved by store; Phase 1 emits same content as raw)
+  - [x] `data/continuous/<timeframe>.parquet` (back-adjusted)
+  - [ ] `data/features/<timeframe>.parquet` — **deferred to Phase 2**
+  - [ ] `data/labels/<timeframe>.parquet` — **deferred to Phase 6**
 
 ### 1.2 Continuous Futures Contract
 
-- [ ] `src/tfex_s50_multi_tf_swing/data/continuous.py` — back-adjusted continuous series
-  - [ ] Roll on volume crossover near expiry (configurable: `5d_before_expiry` default)
-  - [ ] Ratio-adjust historical prices to remove rollover gap
-  - [ ] Preserve raw per-contract series for execution simulation
-- [ ] Unit tests: synthetic two-contract roll, assert post-roll continuity in returns
+- [x] `src/tfex_s50_multi_tf_swing/data/continuous.py` — back-adjusted continuous series
+  - [x] Roll on volume crossover near expiry (configurable: `5d_before_expiry` default)
+  - [x] Ratio-adjust historical prices to remove rollover gap (ratio = far_close / near_close)
+  - [x] Preserve raw per-contract series for execution simulation
+- [x] Unit tests: synthetic two-contract roll, assert post-roll continuity in returns
 
 ### 1.3 Session Metadata
 
-- [ ] `src/tfex_s50_multi_tf_swing/data/session.py`
-  - [ ] Thai market holiday calendar
-  - [ ] Trading session boundaries (morning 09:45–12:30, afternoon 14:30–16:55, night
-    18:45–03:00 — verify against TFEX official sessions)
-  - [ ] Expiry-week flag, rollover-week flag
-  - [ ] Time-of-day buckets: pre-open / open / mid-morning / lunch / afternoon / pre-close / night
+- [x] `src/tfex_s50_multi_tf_swing/data/session.py`
+  - [x] Thai market holiday calendar (2024–2026 baseline; annual refresh documented inline)
+  - [x] Trading session boundaries (morning 09:45–12:30, afternoon 14:30–16:55, night
+    18:45–03:00; pinned per-minute by unit tests)
+  - [x] Expiry-week flag, rollover-week flag
+  - [x] Time-of-day buckets: pre-open / open / mid-morning / lunch / afternoon / pre-close / night
 
 ### 1.4 Validation Pipeline
 
-- [ ] `src/tfex_s50_multi_tf_swing/data/validator.py`
-  - [ ] Missing candle detection per session
-  - [ ] Duplicate timestamp removal
-  - [ ] Abnormal spread / price-gap flag (>3σ)
-  - [ ] Cross-timeframe consistency (5m aggregated → 1H == fetched 1H)
-- [ ] Validation report saved to `data/validation/<date>.json`
+- [x] `src/tfex_s50_multi_tf_swing/data/validator.py`
+  - [x] Missing candle detection within the observed time window
+  - [x] Duplicate timestamp detection
+  - [x] Abnormal spread / price-gap flag (>3σ)
+  - [x] Cross-timeframe consistency (5m aggregated → 1H == fetched 1H)
+  - [x] **Bonus**: `validate_continuous_against_reference` cross-checks our back-adjusted continuous against TradingView's `S501!`
+- [x] Validation report saved to `data/validation/<date>.json`
 
 ### 1.5 Data Quality Notebook
 
-- [ ] `notebooks/01_data_quality.ipynb`
-  - [ ] Missing-candle heatmap per session
-  - [ ] Return distribution by year, by session
-  - [ ] Volume / open-interest evolution across rollovers
-  - [ ] Spread distribution
+- [x] `notebooks/01_data_quality.ipynb`
+  - [x] Missing-candle heatmap per session
+  - [x] Return distribution by year, by session
+  - [x] Volume / open-interest evolution across rollovers
+  - [x] Spread distribution
+
+### Notes
+
+- Per the user's decision (2026-05-28), Phase 1 also writes a TimescaleDB mirror to
+  `db_tfex_s50_multi_tf_swing.ohlcv_raw` and `.ohlcv_continuous` (schema 09 in
+  `quant-infra-db`), so OpenBB / future SQL consumers can read OHLCV without a
+  Parquet round-trip. Parquet remains the source of truth.
+- The `S501!` cross-check is informational, not a hard validator failure — it surfaces
+  in `ValidationReport.cross_check` so a human can eyeball divergence at roll
+  boundaries.
+- The 5-year backfill requires a real `TVKIT_AUTH_TOKEN`; anonymous tvkit sessions cap
+  at 5,000 bars per symbol. The data window is operationally gated on auth, not
+  code-gated.
 
 **Exit criteria:** continuous 4H / 1H / 5m series for ≥ 5 years of S50 history,
 validation report shows < 0.1% missing candles, rollovers visually clean in the
@@ -572,13 +590,14 @@ the calendar consumed by paper trading rather than coding.
 
 > Update this section as phases complete.
 
-- **Active phase:** Phase 1 — Data Infrastructure (Phase 0 complete).
+- **Active phase:** Phase 2 — Feature Engineering (Phase 1 code complete on `feature/phase-1-data-infrastructure`, 2026-05-28).
 - **Completed sub-phases:** 0.1 (repo + tooling), 0.2 (roadmap + agent context),
   0.3 (gateway + DB registration), 0.4 (adapter scaffolding), 0.5 (Docker) all
   complete as of 2026-05-28. End-to-end verification round-trip green; idempotent
   POST proven (2 POSTs → 1 row in `db_gateway.daily_performance`).
 - **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
-- **Blocked by:** nothing. Next: Phase 1.1 (OHLCV ingestion).
+- **Phase 1 plan:** [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md). All five sub-phases shipped on 2026-05-28: tvkit fetcher, back-adjusted continuous via 5d volume-crossover roll, Thai session calendar, validation pipeline + `S501!` cross-check, data-quality notebook. 159 tests, ≥ 94 % coverage on `adapters/` + `data/`, mypy strict clean. TimescaleDB hypertable mirror added via `quant-infra-db` PR #9 (`ohlcv_raw`, `ohlcv_continuous`).
+- **Blocked by:** nothing. Next: Phase 2 (Feature Engineering).
 
 ---
 

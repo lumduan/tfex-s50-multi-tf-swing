@@ -53,3 +53,8 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Phase 1 data infrastructure (Parquet OHLCV, validation reports).
+# Local research store; never committed.
+/data/
+

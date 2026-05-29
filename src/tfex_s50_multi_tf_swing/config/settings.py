@@ -8,8 +8,9 @@ be accidentally logged via ``%r``.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +36,12 @@ class Settings(BaseSettings):
     gateway_base_url: str = "http://quant-api-gateway:8000"
     gateway_api_key: SecretStr = SecretStr("")
     pg_dsn: str | None = None
+
+    # Phase 1 — data infrastructure.
+    data_dir: Path = Path("./data")
+    tvkit_auth_token: SecretStr | None = None
+    data_fetch_concurrency: int = Field(default=4, ge=1, le=32)
+    roll_offset_days: int = Field(default=5, ge=0, le=30)
 
 
 @lru_cache(maxsize=1)
