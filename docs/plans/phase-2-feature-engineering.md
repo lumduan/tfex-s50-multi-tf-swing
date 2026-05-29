@@ -3,7 +3,8 @@
 **Feature:** TFEX S50 Multi-TF Swing — Phase 2: Feature Engineering
 **Branch:** `feature/phase-2-feature-engineering`
 **Created:** 2026-05-29
-**Status:** In progress
+**Status:** Complete
+**Completed:** 2026-05-29
 **Depends On:** Phase 0 (Complete), Phase 1 — Data Infrastructure (Complete)
 
 ---
@@ -368,14 +369,54 @@ Coverage: add `--cov=src/tfex_s50_multi_tf_swing/features` to `pyproject.toml` (
 
 ## Success Criteria
 
-- [ ] All ROADMAP §2.1–2.6 features implemented with unit tests.
-- [ ] Per-TF panels + aligned 5m panel materialise under `data/features/`.
-- [ ] Look-ahead regression test + MTF alignment test pass.
-- [ ] `uv run mypy src tests` strict clean; ruff clean; ≥90% coverage on `features/`.
-- [ ] Plan committed before code; PR opened (not merged).
+- [x] All ROADMAP §2.1–2.6 features implemented with unit tests.
+- [x] Per-TF panels + aligned 5m panel materialise under `data/features/`.
+- [x] Look-ahead regression test + MTF alignment test pass.
+- [x] `uv run mypy src tests` strict clean; ruff clean; ≥90% coverage on `features/`.
+- [x] Plan committed before code; PR opened (not merged).
 
 ---
 
 ## Outcome / Notes
 
-_To be completed after implementation (date, what shipped, test issues, coverage achieved)._
+**Date:** 2026-05-29
+
+**Shipped:** the `features/` package (12 modules) — `errors`, `models`
+(`FeatureConfig` + the timeframe-aware column registry), `indicators` (causal
+primitives: EMA/ATR/true-range/realised-vol/Bollinger/Keltner/ADX/z-score/winsorise/
+swing-pivots), the five feature groups (`trend`, `volatility`, `time_of_day`,
+`structure`, `regime`), `align` (causal multi-timeframe as-of merge), `pipeline`
+(§2.6 assemble → winsorise → trailing z-score) and `store` (`FeatureStore`). Plus the
+owner CLI `scripts/build_features.py` and the data-gated stability notebook scaffold.
+
+**Quality gate (all green):**
+
+- `uv run ruff check .` — passed.
+- `uv run ruff format --check .` — passed.
+- `uv run mypy src tests` (strict) — Success, no issues in 63 source files.
+- `uv run pytest` — **214 passed, 5 skipped** (the Phase 1 infra/gateway-marked
+  integration tests self-skip). **Total coverage 95.6 %**, with **100 % on every
+  `features/` module** (gate `--cov-fail-under=90` reached).
+
+**Notable decisions / deviations:**
+
+- **Polars, not pandas** — the whole layer is Polars to match Phase 1; the brief's
+  generic "pandas/numpy" yielded to "the libs Phase 1 already uses".
+- **Float64 feature panel** — features are statistical and never reach the gateway, so
+  the Decimal-for-money rule does not apply to them (confirmed with the owner).
+- **Vectorised session tagging** mirrors `SessionCalendar`'s constants; an anti-drift
+  test asserts it agrees row-by-row with the calendar.
+- **`rolling_map` percentile** (`rv_percentile`) is the one obvious bottleneck on long
+  5m series; the callback was extracted to a module-level `window_percentile` and unit
+  tested directly (Polars runs the callback off-thread, so line tracing would otherwise
+  miss it).
+
+**Test issues hit during development (resolved):**
+
+- `dt.hour()`/`dt.minute()` return `Int8`, so `hour*60` overflowed (585 wrapped to 73);
+  fixed by widening to `Int32` before the arithmetic.
+- `with_adx` used a temp column named `_atr` and dropped it, clobbering the pipeline's
+  shared `_atr`; renamed the ADX internal to `_adx_atr`.
+- The first `structure` LH fixture had peaks too close together (the tall first peak
+  dominated the rolling window), so the second peak never confirmed; rebuilt with
+  well-separated peaks. Also hardened `recent_is_high` against a null pivot index.

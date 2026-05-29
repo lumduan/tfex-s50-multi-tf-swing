@@ -164,56 +164,78 @@ back-adjusted series.
 > Goal: a feature panel covering trend, volatility, time-of-day, market structure,
 > and regime — this is where the real edge lives, not in any single model.
 
+> **Status:** code complete on `feature/phase-2-feature-engineering` (2026-05-29).
+> Polars-native, look-ahead-free. 214 tests pass, 100 % coverage on every
+> `features/` module (95.6 % combined incl. data/adapters), mypy strict clean.
+> See [`phase-2-feature-engineering.md`](phase-2-feature-engineering.md).
+
 ### 2.1 Trend Features
 
-- [ ] `src/tfex_s50_multi_tf_swing/features/trend.py`
-  - [ ] `ema_slope`: `(EMA_t - EMA_{t-n}) / n`, normalised by ATR
-  - [ ] `structure`: HH/HL/LH/LL classification from swing pivots
-  - [ ] `dist_from_vwap`: `(price - VWAP) / ATR` per session
-- [ ] Unit tests against hand-computed values on synthetic series
+- [x] `src/tfex_s50_multi_tf_swing/features/trend.py`
+  - [x] `ema_slope`: `(EMA_t - EMA_{t-n}) / n`, normalised by ATR (`ema_slope_20`, `ema_slope_50`)
+  - [x] `structure`: HH/HL/LH/LL classification from confirmed swing pivots
+  - [x] `dist_from_vwap`: `(price - VWAP) / ATR` per session
+- [x] Unit tests against hand-computed values on synthetic series
 
 ### 2.2 Volatility Features
 
-- [ ] `src/tfex_s50_multi_tf_swing/features/volatility.py`
-  - [ ] `atr_ratio`: `ATR_short / ATR_long` (expansion / compression detector)
-  - [ ] `bollinger_squeeze`: Bollinger band width vs Keltner channel
-  - [ ] `realised_vol`: rolling realised volatility, multiple horizons
-- [ ] Unit tests: ATR expansion detection on known squeeze → expansion sequence
+- [x] `src/tfex_s50_multi_tf_swing/features/volatility.py`
+  - [x] `atr_ratio`: `ATR_short / ATR_long` (expansion / compression detector)
+  - [x] `bollinger_squeeze`: Bollinger band width vs Keltner channel
+  - [x] `realised_vol`: rolling realised volatility, multiple horizons
+- [x] Unit tests: ATR expansion detection on known squeeze → expansion sequence
 
 ### 2.3 Time-of-Day Features
 
-- [ ] `src/tfex_s50_multi_tf_swing/features/time_of_day.py`
-  - [ ] `opening_range`: high/low of first 15m (and 30m, 60m variants)
-  - [ ] `lunch_zone_flag`: 12:00–14:00 dead-zone indicator
-  - [ ] `close_auction_flag`: last 15m of session
-- [ ] Repeatable Thai-market patterns documented in feature comments
+- [x] `src/tfex_s50_multi_tf_swing/features/time_of_day.py`
+  - [x] `opening_range`: high/low of first 15m (and 30m, 60m variants)
+  - [x] `lunch_zone_flag`: 12:00–14:00 dead-zone indicator
+  - [x] `close_auction_flag`: last 15m of session
+- [x] Repeatable Thai-market patterns documented in feature comments
+  (vectorised session tagging mirrors `SessionCalendar`; anti-drift test asserts agreement)
 
 ### 2.4 Market Structure Features
 
-- [ ] `src/tfex_s50_multi_tf_swing/features/structure.py`
-  - [ ] `overnight_gap`: gap vs prior session close
-  - [ ] `prev_day_high_low`: distance to previous day's H/L in ATR units
-  - [ ] `initial_balance_range`: IB high/low from first hour
-  - [ ] `liquidity_levels`: swept-high / swept-low markers
+- [x] `src/tfex_s50_multi_tf_swing/features/structure.py`
+  - [x] `overnight_gap`: gap vs prior session close
+  - [x] `prev_day_high_low`: distance to previous day's H/L in ATR units (`dist_to_prev_high/low`)
+  - [x] `initial_balance_range`: IB high/low from first hour (`ib_high`, `ib_low`)
+  - [x] `liquidity_levels`: swept-high / swept-low markers (`liquidity_sweep_flag`, emitted at `t+k`)
 
 ### 2.5 Regime Features
 
-- [ ] `src/tfex_s50_multi_tf_swing/features/regime.py`
-  - [ ] `realised_vol_percentile` (rolling N-day rank)
-  - [ ] `trend_persistence` (rolling sign agreement)
-  - [ ] `range_compression` (low ATR + low ADX flag)
-  - [ ] `volume_expansion`
+- [x] `src/tfex_s50_multi_tf_swing/features/regime.py`
+  - [x] `realised_vol_percentile` (rolling N-day rank → `rv_percentile`)
+  - [x] `trend_persistence` (rolling sign agreement)
+  - [x] `range_compression` (low ATR + low ADX flag)
+  - [x] `volume_expansion`
 
 ### 2.6 Feature Pipeline
 
-- [ ] `src/tfex_s50_multi_tf_swing/features/pipeline.py`
-  - [ ] Combine into panel keyed by `(timestamp, timeframe)`
-  - [ ] Winsorise outliers at 1st / 99th percentile
-  - [ ] z-score normalise on a trailing window (no look-ahead)
-- [ ] Unit test: no data leakage across rolling windows
+- [x] `src/tfex_s50_multi_tf_swing/features/pipeline.py`
+  - [x] Combine into panel keyed by `(timestamp, timeframe)`
+  - [x] Winsorise outliers at 1st / 99th percentile
+  - [x] z-score normalise on a trailing window (no look-ahead)
+- [x] Unit test: no data leakage across rolling windows
+  (prefix-equals-full look-ahead regression test in `test_pipeline.py`)
+- [x] **Bonus**: causal multi-timeframe alignment (`features/align.py`) — HTF features
+  availability-shifted (`time + bar_duration`) then backward as-of joined onto the base TF;
+  materialised to `data/features/aligned_5m.parquet`.
 
-**Exit criteria:** feature panel materialised under `data/features/`, all features
-have unit tests, feature stability notebook shows no breakdown across rollovers.
+**Exit criteria:** feature panel materialised under `data/features/` ✓ (per-TF + aligned),
+all features have unit tests ✓. Feature-stability notebook scaffolded
+(`notebooks/02_feature_stability.ipynb`); the full 5-year visual rollover review remains
+**data-gated** on a real `TVKIT_AUTH_TOKEN` backfill, exactly like Phase 1's backfill.
+
+> **Notes (2026-05-29):**
+> - Stack is **Polars** (not pandas) to match Phase 1; features compute and persist as
+>   **Float64** (flags `Int8`, categoricals `Utf8`). Decimal is reserved for money at the
+>   gateway boundary — features are internal and never cross it.
+> - Look-ahead discipline: trailing-only windows (never `center`), confirmation lag
+>   shifted forward for pivots/sweeps, prev-session refs strictly prior, trailing-window
+>   winsorise + z-score, and availability-shifted as-of joins across timeframes.
+> - Bars are open-labelled (verified in `data/fetcher.py`), so an HTF bar at `time=t` is
+>   only usable at `t + TIMEFRAME_MINUTES[tf]`; the aligner keys off that.
 
 ---
 
@@ -590,14 +612,14 @@ the calendar consumed by paper trading rather than coding.
 
 > Update this section as phases complete.
 
-- **Active phase:** Phase 2 — Feature Engineering (Phase 1 code complete on `feature/phase-1-data-infrastructure`, 2026-05-28).
-- **Completed sub-phases:** 0.1 (repo + tooling), 0.2 (roadmap + agent context),
-  0.3 (gateway + DB registration), 0.4 (adapter scaffolding), 0.5 (Docker) all
-  complete as of 2026-05-28. End-to-end verification round-trip green; idempotent
-  POST proven (2 POSTs → 1 row in `db_gateway.daily_performance`).
+- **Active phase:** Phase 3 — Regime Detection (Phase 2 code complete on
+  `feature/phase-2-feature-engineering`, 2026-05-29).
+- **Completed sub-phases:** 0.1–0.5 (2026-05-28); Phase 1 (2026-05-28); Phase 2.1–2.6
+  (2026-05-29).
 - **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
 - **Phase 1 plan:** [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md). All five sub-phases shipped on 2026-05-28: tvkit fetcher, back-adjusted continuous via 5d volume-crossover roll, Thai session calendar, validation pipeline + `S501!` cross-check, data-quality notebook. 159 tests, ≥ 94 % coverage on `adapters/` + `data/`, mypy strict clean. TimescaleDB hypertable mirror added via `quant-infra-db` PR #9 (`ohlcv_raw`, `ohlcv_continuous`).
-- **Blocked by:** nothing. Next: Phase 2 (Feature Engineering).
+- **Phase 2 plan:** [`phase-2-feature-engineering.md`](phase-2-feature-engineering.md). Shipped 2026-05-29: trend / volatility / time-of-day / market-structure / regime feature groups + the §2.6 pipeline (winsorise + trailing z-score) and a causal multi-timeframe aligner. Polars-native, look-ahead-free. 214 tests, 100 % coverage on every `features/` module (95.6 % combined), mypy strict clean. Owner CLI `scripts/build_features.py`; stability notebook scaffolded (data-gated).
+- **Blocked by:** nothing. Next: Phase 3 (Regime Detection) consumes the feature panel.
 
 ---
 
