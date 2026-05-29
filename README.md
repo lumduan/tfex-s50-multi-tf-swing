@@ -111,8 +111,8 @@ serves the unified surface to OpenBB.
 | --- | --- |
 | 0 — Project Bootstrap & Gateway Onboarding | **Complete** (2026-05-28) |
 | 1 — Data Infrastructure | **Code complete** (2026-05-28) — pending 5-year backfill |
-| 2 — Feature Engineering | Not started |
-| 3 — Regime Detection | Not started |
+| 2 — Feature Engineering | **Complete** (2026-05-29) |
+| 3 — Regime Detection | **Rule baseline + policy complete** (2026-05-29) — §3.2 clustering / §3.3 LightGBM deferred |
 | 4 — Higher-TF Bias Engine | Not started |
 | 5 — Setup Detection & Signals | Not started |
 | 6 — ML Probability Filter | Not started |
@@ -221,6 +221,32 @@ feature value.
 
 Plan reference: [`docs/plans/phase-2-feature-engineering.md`](docs/plans/phase-2-feature-engineering.md).
 
+### Phase 3 — Regime detection
+
+Phase 3 classifies every bar into one of five regimes — `trend_up`, `trend_down`,
+`range_low_vol`, `range_high_vol`, `panic` — and maps each to the strategies and
+position-size it permits. It is a pure offline library layer (`regime/`); there is **no
+new endpoint and no change to the gateway ingestion contract** this phase. The signals API
+(Phase 5) and `risk/` wiring (Phase 7) will consume `regime/policy.py` later.
+
+```python
+from tfex_s50_multi_tf_swing.regime import (
+    build_regime_inputs, classify_frame, regime_policy, is_no_trade,
+)
+
+inputs = build_regime_inputs(continuous_4h, "4h")   # un-normalised feature panel + EMA diff
+labelled = classify_frame(inputs)                    # adds a `regime` column
+policy = regime_policy("trend_up")                   # -> allowed strategies, size, direction
+blocked = is_no_trade("range_low_vol")               # True (no-trade regime)
+```
+
+Thresholds default to the values in `.claude/knowledge/regime-detection.md` and are
+overridable via the `TFEX_S50_MULTI_TF_SWING_REGIME_*` env vars (see the config table).
+The LightGBM classifier (§3.3) and clustering notebook (§3.2) are deferred until a
+hand-labelled regime dataset exists.
+
+Plan reference: [`docs/plans/phase-3-regime-detection.md`](docs/plans/phase-3-regime-detection.md).
+
 ## Configuration reference
 
 Environment variables (prefix `TFEX_S50_MULTI_TF_SWING_*`, loaded via
@@ -233,6 +259,11 @@ Environment variables (prefix `TFEX_S50_MULTI_TF_SWING_*`, loaded via
 | `TFEX_S50_MULTI_TF_SWING_PG_DSN` | — | DSN for `db_tfex_s50_multi_tf_swing` (required when `DB_WRITE_ENABLED=true`). |
 | `TFEX_S50_MULTI_TF_SWING_GATEWAY_BASE_URL` | `http://quant-api-gateway:8000` | Umbrella gateway base URL. |
 | `TFEX_S50_MULTI_TF_SWING_GATEWAY_API_KEY` | — | Shared key for ingestion auth. |
+| `TFEX_S50_MULTI_TF_SWING_REGIME_PANIC_RV` | `0.95` | `panic` when realised-vol percentile exceeds this. |
+| `TFEX_S50_MULTI_TF_SWING_REGIME_PANIC_VOLUME_Z` | `3.0` | `panic` when trailing volume z-score exceeds this. |
+| `TFEX_S50_MULTI_TF_SWING_REGIME_RANGE_LOW_RV` | `0.30` | `range_low_vol` rv-percentile upper bound. |
+| `TFEX_S50_MULTI_TF_SWING_REGIME_RANGE_HIGH_RV` | `0.70` | `range_high_vol` rv-percentile reference. |
+| `TFEX_S50_MULTI_TF_SWING_REGIME_TREND_PERSIST_MIN` | `0.30` | min `\|trend_persistence\|` to call a tape trending. |
 
 Never commit a real `.env` — copy `.env.example` and fill values locally.
 
