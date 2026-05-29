@@ -72,6 +72,7 @@ pythonpath = ["."]
 addopts = [
     "--cov=src/tfex_s50_multi_tf_swing/adapters",
     "--cov=src/tfex_s50_multi_tf_swing/data",
+    "--cov=src/tfex_s50_multi_tf_swing/features",
     "--cov-report=term-missing",
     "--cov-fail-under=90",
     "--import-mode=importlib",
@@ -85,6 +86,7 @@ markers = [
 source = [
     "src/tfex_s50_multi_tf_swing/adapters",
     "src/tfex_s50_multi_tf_swing/data",
+    "src/tfex_s50_multi_tf_swing/features",
 ]
 branch = false
 
