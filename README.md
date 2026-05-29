@@ -110,7 +110,7 @@ serves the unified surface to OpenBB.
 | Phase | Status |
 | --- | --- |
 | 0 — Project Bootstrap & Gateway Onboarding | **Complete** (2026-05-28) |
-| 1 — Data Infrastructure | Not started |
+| 1 — Data Infrastructure | **Code complete** (2026-05-28) — pending 5-year backfill |
 | 2 — Feature Engineering | Not started |
 | 3 — Regime Detection | Not started |
 | 4 — Higher-TF Bias Engine | Not started |
@@ -153,6 +153,39 @@ docker compose -f docker-compose.yml -f docker-compose.private.yml up -d   # own
 curl http://localhost:8200/health
 # → {"status":"ok","service":"tfex-s50-multi-tf-swing","version":"0.1.0"}
 ```
+
+### Phase 1 — Data refresh (owner mode)
+
+Phase 1 ships an OHLCV pipeline: TradingView (tvkit) → Parquet (`data/raw/`,
+`data/continuous/`) → optional TimescaleDB mirror in `db_tfex_s50_multi_tf_swing`.
+
+Required env when running in owner mode:
+
+```bash
+TFEX_S50_MULTI_TF_SWING_DB_WRITE_ENABLED=true
+TFEX_S50_MULTI_TF_SWING_PG_DSN=postgresql://postgres:<pass>@quant-postgres:5432/db_tfex_s50_multi_tf_swing
+# Required for the 5-year backfill (anonymous tvkit caps at 5,000 bars per symbol):
+TFEX_S50_MULTI_TF_SWING_TVKIT_AUTH_TOKEN={"sessionid":"...","sessionid_sign":"..."}
+```
+
+Refresh:
+
+```bash
+uv run python scripts/refresh_ohlcv.py \
+    --contract S50M2026 --contract S50U2026 --contract S50Z2026 \
+    --timeframe 5m --timeframe 1h --timeframe 4h \
+    --start 2026-04-01 --end 2026-05-01
+# Re-run is idempotent — same rows in / out.
+```
+
+Validate a stored Parquet snapshot without re-fetching:
+
+```bash
+uv run python scripts/validate_ohlcv.py --as-of 2026-04-30 \
+    --contract S50M2026 --timeframe 5m
+```
+
+Plan reference: [`docs/plans/phase-1-data-infrastructure.md`](docs/plans/phase-1-data-infrastructure.md).
 
 ## Configuration reference
 

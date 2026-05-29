@@ -29,8 +29,14 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=app:app src/ ./src/
 COPY --chown=app:app api/ ./api/
+COPY --chown=app:app scripts/ ./scripts/
+
+# Phase 1: data directory owned by the app user so refresh scripts can write
+# OHLCV Parquet snapshots. In compose this path is backed by a named volume.
+RUN mkdir -p /app/data && chown -R app:app /app/data
 
 ENV TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE=${TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE} \
+    TFEX_S50_MULTI_TF_SWING_DATA_DIR=/app/data \
     PYTHONPATH=/app/src \
     VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:$PATH \

@@ -142,15 +142,31 @@ shared `quant-network`.
 - **Parquet (PyArrow)** is the durable store for all tabular data under `data/`
   (gitignored) and `results/static/` (tracked, public-safe). Partition by date /
   contract where feasible.
-- **No SQLite/Postgres in `src/tfex_s50_multi_tf_swing/` core** — the Postgres / Mongo
-  dependency lives entirely in `src/tfex_s50_multi_tf_swing/adapters/` and is opt-in
-  via `TFEX_S50_MULTI_TF_SWING_DB_WRITE_ENABLED`.
+- The Postgres dependency is opt-in via `TFEX_S50_MULTI_TF_SWING_DB_WRITE_ENABLED`.
+  Phase 0 wired the gateway HTTP path via `adapters/`. Phase 1 added a direct
+  Postgres mirror via `data/db_writer.py` (asyncpg), gated by the same flag plus
+  `TFEX_S50_MULTI_TF_SWING_PG_DSN`.
 - Postgres DBs when write-back is on:
   - `db_tfex_s50_multi_tf_swing`: `equity_curve` (TimescaleDB hypertable),
     `trade_history` (with `side`, `contracts`, `margin_used`), `backtest_log`,
-    `benchmark_equity_curve` (S50 underlying / SET50 TR).
+    `benchmark_equity_curve` (S50 underlying / SET50 TR), plus the Phase 1
+    `ohlcv_raw` / `ohlcv_continuous` hypertables (provisioned by
+    `quant-infra-db` init-script 09).
   - `db_gateway`: written **only via HTTP** to `quant-api-gateway`. The strategy
     does not connect directly to `db_gateway`.
+
+### Phase 1 — data layer
+
+- **TradingView symbols** are pinned in `src/tfex_s50_multi_tf_swing/data/contracts.py`:
+  - Per-contract: `TFEX:S50<H|M|U|Z><yyyy>` (e.g. `TFEX:S50H2026`).
+  - Continuous reference: `TFEX:S501!` — TradingView's auto-roll. **Cross-check
+    only**; the strategy builds its own back-adjusted continuous so the roll
+    policy is explicit (`roll_offset_days`, default 5) and reproducible.
+- **Back-adjustment ratio** = `far_close(t_roll) / near_close(t_roll)`. The
+  `RollRecord` stored alongside continuous Parquet captures the ratio so a human
+  can audit any subsequent re-roll.
+- **TimescaleDB OHLCV tables** live ONLY in `db_tfex_s50_multi_tf_swing` (never
+  `db_gateway`). The standard ingestion contract is unchanged in Phase 1.
 
 ### Public data boundary
 
