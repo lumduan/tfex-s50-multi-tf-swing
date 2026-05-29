@@ -158,7 +158,7 @@ def test_validate_continuous_against_reference_flags_divergence() -> None:
     base = _build_morning_5m_frame().select(["time", pl.col("close").cast(pl.Decimal(18, 4))])
     # Inject a 5% divergence on the second row's close in the reference series.
     rows = base.to_dicts()
-    rows[1]["close"] = rows[1]["close"] * Decimal("1.05") 
+    rows[1]["close"] = rows[1]["close"] * Decimal("1.05")
     ref = pl.DataFrame(rows)
     result = v.validate_continuous_against_reference(
         our_continuous=base,

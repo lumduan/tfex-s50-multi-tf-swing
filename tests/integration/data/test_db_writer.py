@@ -36,7 +36,7 @@ async def writer() -> AsyncIterator[OhlcvDbWriter]:
     dsn = _dsn_or_skip()
     async with OhlcvDbWriter.from_dsn(dsn) as w:
         # Wipe any residue from prior runs so counts are deterministic.
-        async with w._pool.acquire() as conn: 
+        async with w._pool.acquire() as conn:
             await conn.execute("DELETE FROM ohlcv_raw WHERE contract LIKE 'S50TEST%'")
             await conn.execute(
                 "DELETE FROM ohlcv_continuous WHERE contract_at_time LIKE 'S50TEST%'"
@@ -78,7 +78,7 @@ async def test_upsert_raw_then_idempotent_reupsert(writer: OhlcvDbWriter) -> Non
     rows2 = await writer.upsert_raw_frame(df, contract="S50TEST_M2026", timeframe="5m")
     assert rows1 == 5
     assert rows2 == 5  # writer reports rows attempted, not rows changed
-    async with writer._pool.acquire() as conn: 
+    async with writer._pool.acquire() as conn:
         count = await conn.fetchval(
             "SELECT COUNT(*) FROM ohlcv_raw WHERE contract = 'S50TEST_M2026'"
         )
@@ -89,7 +89,7 @@ async def test_upsert_continuous_then_idempotent_reupsert(writer: OhlcvDbWriter)
     df = _continuous_frame(5)
     await writer.upsert_continuous_frame(df, timeframe="5m")
     await writer.upsert_continuous_frame(df, timeframe="5m")
-    async with writer._pool.acquire() as conn: 
+    async with writer._pool.acquire() as conn:
         count = await conn.fetchval(
             "SELECT COUNT(*) FROM ohlcv_continuous WHERE contract_at_time = 'S50TEST_M2026'"
         )

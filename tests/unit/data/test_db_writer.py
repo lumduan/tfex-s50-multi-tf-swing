@@ -126,7 +126,7 @@ class _FakePool:
 
 async def test_writer_upsert_raw_executes_sql() -> None:
     pool = _FakePool()
-    writer = OhlcvDbWriter(pool=pool) 
+    writer = OhlcvDbWriter(pool=pool)
     rows = await writer.upsert_raw_frame(_raw_frame(), contract="S50M2026", timeframe="5m")
     assert rows == 1
     assert len(pool.captured) == 1
@@ -138,7 +138,7 @@ async def test_writer_upsert_raw_executes_sql() -> None:
 
 async def test_writer_upsert_continuous_executes_sql() -> None:
     pool = _FakePool()
-    writer = OhlcvDbWriter(pool=pool) 
+    writer = OhlcvDbWriter(pool=pool)
     df = _raw_frame().with_columns(
         [
             pl.lit("S50M2026").alias("contract_at_time"),
@@ -160,12 +160,12 @@ async def test_writer_raises_dbwritererror_on_postgres_error() -> None:
         def acquire(self) -> _BadConn:
             return _BadConn(self.captured)
 
-    writer = OhlcvDbWriter(pool=_BadPool()) 
+    writer = OhlcvDbWriter(pool=_BadPool())
     with pytest.raises(DbWriterError):
         await writer.upsert_raw_frame(_raw_frame(), contract="S50M2026", timeframe="5m")
 
 
 async def test_writer_close_is_safe() -> None:
     pool = _FakePool()
-    writer = OhlcvDbWriter(pool=pool) 
+    writer = OhlcvDbWriter(pool=pool)
     await writer.close()
