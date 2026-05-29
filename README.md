@@ -187,6 +187,40 @@ uv run python scripts/validate_ohlcv.py --as-of 2026-04-30 \
 
 Plan reference: [`docs/plans/phase-1-data-infrastructure.md`](docs/plans/phase-1-data-infrastructure.md).
 
+### Phase 2 — Feature engineering
+
+Phase 2 turns the back-adjusted continuous OHLCV into a causal, multi-timeframe
+**feature panel** (trend / volatility / time-of-day / market-structure / regime).
+Features are Polars-native, look-ahead-free, and persisted as Float64 under
+`data/features/` (never Decimal — features never reach the gateway).
+
+Build the panels from existing continuous Parquet (`data/continuous/<tf>.parquet`):
+
+```bash
+uv run python scripts/build_features.py \
+    --timeframe 5m --timeframe 1h --timeframe 4h --base-timeframe 5m
+# writes data/features/<tf>.parquet (per timeframe)
+#    and data/features/aligned_5m.parquet (5m widened with causally-aligned HTF features)
+```
+
+Inspect a panel programmatically:
+
+```python
+from tfex_s50_multi_tf_swing.features import FeatureStore, FeatureConfig
+
+store = FeatureStore("./data", FeatureConfig())
+panel = store.read_panel("5m")        # per-timeframe features
+aligned = store.read_aligned("5m")    # + 1h_/4h_ columns, no look-ahead
+```
+
+**Look-ahead guarantee:** trailing-only windows, confirmation-lagged pivots/sweeps,
+strictly-prior session references, trailing-window normalisation, and
+availability-shifted (`time + bar_duration`) as-of joins across timeframes. A
+prefix-equals-full regression test proves appending future bars never changes a past
+feature value.
+
+Plan reference: [`docs/plans/phase-2-feature-engineering.md`](docs/plans/phase-2-feature-engineering.md).
+
 ## Configuration reference
 
 Environment variables (prefix `TFEX_S50_MULTI_TF_SWING_*`, loaded via

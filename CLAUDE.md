@@ -54,9 +54,10 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src tests && 
 Owner pipeline (private mode — implemented progressively from Phase 1 onward):
 
 ```bash
-uv run python scripts/fetch_history.py    # pull OHLCV (4H/1H/5m) → data/raw
-uv run python scripts/build_continuous.py # back-adjusted continuous contract → data/continuous
-uv run python scripts/refresh_daily.py    # end-of-day pipeline → gateway daily report
+uv run python scripts/refresh_ohlcv.py    # pull OHLCV (4H/1H/5m) → data/raw + continuous (Phase 1)
+uv run python scripts/validate_ohlcv.py   # validate a stored snapshot (Phase 1)
+uv run python scripts/build_features.py   # continuous → data/features/<tf> + aligned_5m (Phase 2)
+uv run python scripts/refresh_daily.py    # end-of-day pipeline → gateway daily report (future)
 uv run python scripts/run_paper.py        # paper-trading runner (Phase 9)
 ```
 
@@ -167,6 +168,22 @@ shared `quant-network`.
   can audit any subsequent re-roll.
 - **TimescaleDB OHLCV tables** live ONLY in `db_tfex_s50_multi_tf_swing` (never
   `db_gateway`). The standard ingestion contract is unchanged in Phase 1.
+
+### Phase 2 — feature layer
+
+- `src/tfex_s50_multi_tf_swing/features/` consumes the back-adjusted continuous series
+  and emits a panel keyed by `(time, timeframe)` to `data/features/<tf>.parquet`, plus a
+  causally-aligned `data/features/aligned_5m.parquet`. One-way dependency: `data/ → features/`.
+- **Features are Float64** (flags `Int8`, categoricals `Utf8`) — statistical quantities
+  that never cross the gateway boundary, so the Decimal-for-money rule does not apply to
+  them. Prices read from the store are cast Decimal→Float64 at the feature boundary.
+- **Look-ahead-free by construction:** trailing-only windows (never `center`),
+  confirmation lag shifted forward for swing pivots / liquidity sweeps, strictly-prior
+  session references, trailing-window winsorise + z-score, and availability-shifted
+  (`time + TIMEFRAME_MINUTES[tf]`) as-of joins in `features/align.py`. Bars are
+  open-labelled (see `data/fetcher.py`).
+- Vectorised session tagging in `features/time_of_day.py` mirrors `SessionCalendar`'s
+  constants; an anti-drift test asserts row-by-row agreement.
 
 ### Public data boundary
 
