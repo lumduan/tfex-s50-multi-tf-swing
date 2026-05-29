@@ -246,38 +246,64 @@ all features have unit tests ✓. Feature-stability notebook scaffolded
 
 ### 3.1 Rule-Based Baseline
 
-- [ ] `src/tfex_s50_multi_tf_swing/regime/rules.py`
-  - [ ] Classify into `trend_up`, `trend_down`, `range_low_vol`, `range_high_vol`, `panic`
-  - [ ] Rule set documented in `.claude/knowledge/regime-detection.md`
-- [ ] Unit tests on labelled synthetic series
+- [x] `src/tfex_s50_multi_tf_swing/regime/rules.py`
+  - [x] Classify into `trend_up`, `trend_down`, `range_low_vol`, `range_high_vol`, `panic`
+  - [x] Rule set documented in `.claude/knowledge/regime-detection.md`
+- [x] Unit tests on labelled synthetic series
 
 ### 3.2 Clustering Step (optional intermediate)
 
-- [ ] `notebooks/03_regime_clustering.ipynb` — KMeans / Gaussian Mixture on regime
-  feature vector; visual comparison against rule-based labels
+- [-] `notebooks/03_regime_clustering.ipynb` — KMeans / Gaussian Mixture on regime
+  feature vector; visual comparison against rule-based labels *(deferred — optional;
+  see note below)*
 
 ### 3.3 LightGBM Classifier
 
-- [ ] `src/tfex_s50_multi_tf_swing/regime/model.py`
-  - [ ] LightGBM multi-class classifier
-  - [ ] Trained on rule-based labels as weak supervision, then refined with
+- [-] `src/tfex_s50_multi_tf_swing/regime/model.py` *(deferred — needs a hand-labelled
+  dataset; see note below)*
+  - [-] LightGBM multi-class classifier
+  - [-] Trained on rule-based labels as weak supervision, then refined with
     hand-curated regime windows
-  - [ ] Walk-forward retrain schedule (quarterly)
-- [ ] Confusion matrix and regime transition stability notebook
+  - [-] Walk-forward retrain schedule (quarterly)
+- [-] Confusion matrix and regime transition stability notebook
 
 ### 3.4 Regime-to-Strategy Mapping
 
-- [ ] `src/tfex_s50_multi_tf_swing/regime/policy.py` — `regime_to_strategies()` returning
+- [x] `src/tfex_s50_multi_tf_swing/regime/policy.py` — `regime_to_strategies()` returning
   the allowed strategy set per regime:
-  - [ ] `trend_up / trend_down` → A (pullback continuation), B (opening-range breakout)
-  - [ ] `range_high_vol` → C (liquidity sweep reversal)
-  - [ ] `range_low_vol` → no trade
-  - [ ] `panic` → reduced size (50%) or no trade
-- [ ] Unit test: every regime maps to a defined policy
+  - [x] `trend_up / trend_down` → A (pullback continuation), B (opening-range breakout)
+  - [x] `range_high_vol` → C (liquidity sweep reversal)
+  - [x] `range_low_vol` → no trade
+  - [x] `panic` → reduced size (50%) or no trade
+- [x] Unit test: every regime maps to a defined policy
 
 **Exit criteria:** regime classifier with > 70% agreement vs hand-labelled regimes
 on a held-out year; "no trade" regimes correctly suppress signals; regime-to-strategy
 policy table green-flagged.
+
+> **Notes (2026-05-29):**
+> - **§3.1 + §3.4 shipped** in PR `feature/phase-3-regime-detection`. New leaf package
+>   `src/tfex_s50_multi_tf_swing/regime/` (`errors.py`, `models.py`, `rules.py`,
+>   `policy.py`) consuming the **un-normalised** Phase 2 feature panel. Plan:
+>   [`phase-3-regime-detection.md`](phase-3-regime-detection.md). Coverage gate extended
+>   to `regime/` (100% on the new module; suite 96% overall).
+> - **§3.2 + §3.3 deferred.** The LightGBM exit criterion (> 70% agreement vs
+>   hand-labelled regimes on a held-out year) requires a hand-labelled regime dataset that
+>   does not exist yet, and `.claude/knowledge/regime-detection.md` says "do not skip
+>   steps" — the rule baseline (step 1) is the weak-supervision target for the future
+>   model. Clustering (§3.2) is explicitly optional. Both move to a follow-up PR once a
+>   labelled window set exists.
+> - **Stayed ROADMAP-pure:** no FastAPI endpoint, no gateway `extended_data` change, no
+>   `risk/` wiring this phase — the `api/` (Phase 5) and `risk/` (Phase 7) packages do not
+>   exist yet. `regime/policy.py` is the gating contract those phases will consume.
+> - **Gotcha:** the `structure` (HH/HL/LH/LL) feature is frequently null on synthetic
+>   series with sparse swing pivots, so deterministic classifier tests build the regime
+>   input frame directly (per-branch) rather than relying on the full pipeline to emit a
+>   specific structure label. Null core inputs (insufficient lookback) are classified
+>   `range_low_vol` — the no-trade bucket — so trading is never enabled on undefined
+>   features.
+> - **Dep hygiene:** bumped transitive `idna` 3.13→3.17 and `urllib3` 2.6.3→2.7.0 in
+>   `uv.lock` to clear pre-existing `pip-audit` advisories (not introduced by this phase).
 
 ---
 

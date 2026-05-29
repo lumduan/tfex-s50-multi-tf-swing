@@ -60,3 +60,39 @@ Refine the thresholds based on the labelled dataset built in Phase 3.
 - Agreement with hand-labelled regimes on a held-out year must be > 70%.
 - Confusion matrix and transition-frequency heatmap saved per training run.
 - Confirm `range_low_vol` and `lunch_zone` regimes meaningfully suppress signals.
+
+## Implementation status (2026-05-29)
+
+**Step 1 (rule baseline) and the §3.4 policy table are implemented** in
+`src/tfex_s50_multi_tf_swing/regime/`. Steps 2 (clustering) and 3 (LightGBM) are deferred
+until a hand-labelled regime dataset exists.
+
+### Input contract
+
+The classifier reads the **un-normalised** Phase 2 feature panel
+(`build_panel(df, tf, FeatureConfig(normalise=False))`). The normalised panel z-scores
+`ema_slope_*` / `dist_from_vwap` against a trailing window, which destroys the absolute
+signs the rules rely on. `build_regime_inputs()` produces the raw input columns:
+`ema_fast_minus_slow` (derived from `close` via `indicators.ema`, since EMA *levels* are
+not panel columns), `ema_slope_fast`, `structure`, `dist_from_vwap`, `rv_percentile`,
+`trend_persistence`, `volume_expansion`, `range_compression`.
+
+### Finalised default thresholds (`RegimeThresholds`)
+
+| Threshold | Default | Rule |
+| --- | --- | --- |
+| `panic_rv` | 0.95 | `panic` when `rv_percentile` exceeds it |
+| `panic_volume_z` | 3.0 | `panic` when `volume_expansion` z-score exceeds it |
+| `range_low_rv` | 0.30 | `range_low_vol` lower bound (with `range_compression == 1`) |
+| `range_high_rv` | 0.70 | `range_high_vol` upper band reference |
+| `trend_persist_min` | 0.30 | min `|trend_persistence|` to call a tape trending |
+
+Overridable via `TFEX_S50_MULTI_TF_SWING_REGIME_*` / `Settings.regime_thresholds()`.
+
+### Evaluation order & edge cases
+
+`panic` is evaluated first (a blow-off dominates an otherwise-trending tape), then trend,
+then `range_low_vol`, with `range_high_vol` as the residual. Rows with null core inputs
+(insufficient lookback) are labelled `range_low_vol` — the no-trade bucket — so trading is
+never enabled on undefined features. The lunch dead-zone is a no-trade *condition* layered
+on top via `policy.is_no_trade(regime, lunch_zone=True)`, not a sixth regime.

@@ -185,6 +185,24 @@ shared `quant-network`.
 - Vectorised session tagging in `features/time_of_day.py` mirrors `SessionCalendar`'s
   constants; an anti-drift test asserts row-by-row agreement.
 
+### Phase 3 — regime layer
+
+- `src/tfex_s50_multi_tf_swing/regime/` classifies every bar into one of five regimes
+  (`trend_up`, `trend_down`, `range_low_vol`, `range_high_vol`, `panic`) and maps each to
+  the strategies / position-size it permits (`policy.py`, ROADMAP §3.4). One-way dependency:
+  `features/ → regime/`. Pure offline library code — no endpoint, no gateway write.
+- It consumes the **un-normalised** feature panel
+  (`build_panel(..., FeatureConfig(normalise=False))`): the normalised panel z-scores
+  `ema_slope_*` / `dist_from_vwap`, which would destroy the absolute signs the rules need.
+  `build_regime_inputs()` bridges from a continuous OHLCV frame; `classify_frame()` is the
+  vectorised entry point and `classify_row()` the scalar one.
+- **Thresholds live only in config**: `RegimeThresholds` (frozen Pydantic) with defaults
+  from `.claude/knowledge/regime-detection.md`, overridable via
+  `TFEX_S50_MULTI_TF_SWING_REGIME_*` and `Settings.regime_thresholds()`. No threshold is
+  hard-coded at a call site.
+- §3.2 (clustering notebook) and §3.3 (LightGBM) are deferred until a hand-labelled regime
+  dataset exists; the rule baseline is their weak-supervision target.
+
 ### Public data boundary
 
 Raw OHLCV columns (`open`, `high`, `low`, `close`, `volume`) and proprietary feature
@@ -240,9 +258,9 @@ must enforce this in CI as the project grows. `data/` is gitignored.
 - `logger = logging.getLogger(__name__)` — never `print` in `src/`. Use `%`-formatting
   for log messages so level filtering saves work.
 - File-size target ≤ 400 lines; functions ≤ ~50 lines.
-- Coverage target ≥ 90% on `src/tfex_s50_multi_tf_swing/adapters/` and
-  `src/tfex_s50_multi_tf_swing/risk/` (enforced via `--cov-fail-under=90` once those
-  modules exist).
+- Coverage target ≥ 90% (`--cov-fail-under=90`), enforced over the modules that exist:
+  currently `adapters/`, `data/`, `features/`, and `regime/`. `risk/` joins the list once
+  it lands (Phase 7).
 - Tests use `asyncio_mode = "auto"` and `--import-mode=importlib`.
 - Integration tests requiring the live `quant-infra-db` or the gateway are marked
   `@pytest.mark.infra_db` / `@pytest.mark.gateway` and self-skip when DSNs / base
