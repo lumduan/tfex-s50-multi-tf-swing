@@ -185,7 +185,14 @@ shared `quant-network`.
 - Vectorised session tagging in `features/time_of_day.py` mirrors `SessionCalendar`'s
   constants; an anti-drift test asserts row-by-row agreement.
 
-### Phase 4 — OHLCV source (`TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE`)
+### Market data source (`TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE`)
+
+**Authoritative rule: tfex never fetches tvkit and never owns the TradingView cookie.** The
+canonical OHLCV producer is the standalone **`quant-marketdata-engine`** (the sole
+tvkit-cookie owner, container `quant-marketdata-engine:8000` / host `:8300`,
+gateway-proxied at `/api/v2/engines/market-data/*`); tfex *reads* it. This is the engine
+integration delivered by `feature-market-data-engine` **Phase 4 (shipped 2026-06-02)** —
+distinct from this strategy's own Phase 4 (HTF Bias Engine).
 
 The owner-side refresh acquires OHLCV through a small factory
 (`data/sources.py:build_ohlcv_fetcher`) selected by `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE`;
@@ -217,7 +224,17 @@ On the `engine` source:
   `cagg_ohlcv_4h` aggregate that is not yet routed) raises `EngineTimeframeUnavailableError`
   before any I/O — no local rollup (Decision D10). Enabling it later is a one-line change to
   `data/engine_fetcher.py:_TF_TO_ENGINE` once the engine exposes a 4h route.
-- Default is unchanged behaviour; rollback = leave the flag unset / `mirror`.
+- Default is unchanged behaviour; rollback = leave the flag unset / `mirror`. The default
+  flip `mirror → engine` is **pending Phase 5.x** end-to-end verification (100% parity).
+
+**See also:** the ROADMAP's authoritative
+[Market data source](docs/plans/ROADMAP.md#market-data-source--the-market-data-engine)
+section; the engine reference docs
+[`../../quant-marketdata-engine/docs/README.md`](../../quant-marketdata-engine/docs/README.md);
+and the umbrella reader-cutover knowledge
+[`../../.claude/knowledge/feature-market-data-engine-reader-cutover.md`](../../.claude/knowledge/feature-market-data-engine-reader-cutover.md)
++ cutover runbook
+[`../../.claude/playbooks/marketdata-engine-cutover.md`](../../.claude/playbooks/marketdata-engine-cutover.md).
 
 ### Phase 3 — regime layer
 
@@ -319,6 +336,10 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `f
 - **Backtest protocol:** `.claude/knowledge/backtest-protocol.md`
 - **Development workflow:** `.claude/playbooks/development-workflow.md`
 - **Gateway onboarding checklist:** `.claude/playbooks/onboarding-to-gateway.md`
+- **Market data source (engine reads, never tvkit):** the
+  [Market data source](docs/plans/ROADMAP.md#market-data-source--the-market-data-engine)
+  ROADMAP section; engine docs `../../quant-marketdata-engine/docs/README.md`; reader-cutover
+  knowledge `../../.claude/knowledge/feature-market-data-engine-reader-cutover.md`
 - **Umbrella system map:** `../../CLAUDE.md`
 - **Strategy onboarding contract:** `../../STRATEGY_ONBOARDING.md`
 - **Template repo (for code conventions):** `../csm-set/`

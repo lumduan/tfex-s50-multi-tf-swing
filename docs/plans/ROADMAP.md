@@ -17,6 +17,92 @@ before the next begins. The goal is a **robust live system, not a beautiful back
 
 ---
 
+## Market data source — the Market Data Engine
+
+> **The single most important data rule for this strategy: tfex NEVER fetches tvkit and
+> NEVER owns the TradingView cookie.** All OHLCV is produced once by the canonical
+> **`quant-marketdata-engine`** (the sole tvkit-cookie owner) and tfex *reads* it. Every
+> data-acquisition step below — backfill, daily refresh, backtest, paper, live — resolves
+> through this one source. This supersedes the original Phase-1 assumption (authored before
+> the engine existed) that the strategy fetches tvkit itself.
+
+### How tfex reaches the engine
+
+- The engine runs on container `quant-marketdata-engine:8000` (host `:8300`) on
+  `quant-network` and is **gateway-proxied** at `/api/v2/engines/market-data/*`. tfex calls
+  the **gateway proxy**, never the engine directly across a repo boundary, never tvkit.
+  - In-container base URL: `http://quant-api-gateway:8000/api/v2/engines/market-data`.
+  - Host-local dev: `http://localhost:<gateway-host-port>/api/v2/engines/market-data`
+    (the engine itself is reachable at `http://localhost:8300` for debugging only).
+- The data layer selects its source via the flag
+  **`TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE = mirror | engine`** through the factory
+  `data/sources.py:build_ohlcv_fetcher`. Both branches return the identical
+  `FetcherProtocol`, so `refresh_all` and everything downstream
+  (store → continuous → validator → db_writer) is source-agnostic and the switch is
+  reversible.
+
+| Mode | Default? | Behaviour |
+|---|---|---|
+| **`mirror`** | ✅ current default | Legacy Phase-1 path: `OhlcvFetcher` fetches tvkit and writes the local Parquet store + the `09` TimescaleDB mirror. **Requires the tvkit cookie** — the only path that still does. Retained for rollback until tfex is verified on `engine`. |
+| **`engine`** | pending Phase 5.x | `EngineOhlcvFetcher` reads **RAW per-dated-contract** bars (`/ohlcv?adjusted=false`, e.g. `S50M2026`) from the Market Data Engine via the gateway proxy. **No tvkit cookie on this path.** Needs `..._MARKET_DATA_ENGINE_BASE_URL` (include the proxy prefix); `..._MARKET_DATA_ENGINE_API_KEY` only if the engine sets one. |
+
+### What the `engine` source does (and does not) do
+
+- **Continuous is built locally.** tfex reads raw dated contracts and back-adjusts via
+  `data/continuous.py` — the exact series the strategy was validated on (option (b),
+  back-adjusted). The engine's native back-adjusted `S501!` is unbuilt (engine Phase-5
+  adjustment-parity), so `fetch_continuous_reference` returns an empty frame and the `S501!`
+  cross-check is skipped on this source.
+- **The `09` mirror is a derived cache, not a source of truth.** On `engine`,
+  `market_data.*` (in `db_market_data`) is canonical; tfex's standalone
+  `db_tfex_s50_multi_tf_swing.ohlcv_raw` / `.ohlcv_continuous` (init-script `09`) is demoted
+  to a derived local cache — never a parallel ingest. The physical DROP/migration of the `09`
+  tables is a **separate `quant-infra-db` PR**, deferred until `engine` is the validated
+  default and no reader touches `09`.
+- **`open_interest` is carried** through the engine path (NULL for equities).
+
+### Edge cases this source model must handle
+
+- **Engine / gateway unavailable** → no live read; fall back to the offline **Parquet
+  snapshot / local store** for backtest scans (infra-db is not a hard dependency for offline
+  work). A typed error surfaces; the daily refresh fails loudly rather than silently fetching
+  tvkit.
+- **`4h` not yet supported on `engine`.** The engine read API serves only `1d | 1h | 5m`;
+  `4h` (a `cagg_ohlcv_4h` aggregate that is **not routed**) is declined client-side with a
+  typed `EngineTimeframeUnavailableError` **before any I/O** — **never rolled up locally**
+  (D10). Enabling it later = add an engine `4h` route, then a one-line change to
+  `data/engine_fetcher.py:_TF_TO_ENGINE`. Until then, `4h` is only available on the `mirror`
+  source (see Phase 4 — HTF Bias Engine).
+- **Mirror cache staleness.** While `mirror` is the default, the local Parquet / `09` mirror
+  can drift from the canonical store. The cutover to `engine` ends this divergence; the
+  verification gate below guards the flip.
+- **Verification gate.** Flipping the default `mirror` → `engine` is gated on **Tier-1 parity
+  (100%)** for the contracts tfex uses (5m / 1h), producing
+  `quant-marketdata-engine/reports/verification-tfex.json`, plus a confirmation that the
+  locally back-adjusted continuous matches the validated series. This is **pending Phase 5.x**
+  (no mirror Parquet / no TFEX data in the engine yet).
+
+### Status of the engine integration
+
+This integration is **Phase 4 of the cross-cutting `feature-market-data-engine`** (the
+reader-cutover phase) — **distinct from this strategy's own Phase 4 (HTF Bias Engine)
+below**. It **shipped 2026-06-02** as tfex PR #6 (`8756b1a`): the flag, the
+`EngineOhlcvFetcher`, the `adapters/market_data_engine_client.py`, and the boundary tests.
+**The default is still `mirror`** — tfex end-to-end verification + the default flip are
+**pending Phase 5.x**.
+
+**See also:**
+[`../../../../quant-marketdata-engine/docs/plans/ROADMAP.md`](../../../../quant-marketdata-engine/docs/plans/ROADMAP.md)
+(engine roadmap, Phase 4) ·
+[`../../../../quant-marketdata-engine/docs/README.md`](../../../../quant-marketdata-engine/docs/README.md)
+(engine reference docs) ·
+[`../../../../.claude/knowledge/feature-market-data-engine-reader-cutover.md`](../../../../.claude/knowledge/feature-market-data-engine-reader-cutover.md)
+(reader-cutover decisions) ·
+[`../../../../.claude/playbooks/marketdata-engine-cutover.md`](../../../../.claude/playbooks/marketdata-engine-cutover.md)
+(cutover runbook).
+
+---
+
 ## Phase 0 — Project Bootstrap & Gateway Onboarding
 
 > Goal: working repo, clean tooling, registered as a strategy under the umbrella
@@ -95,9 +181,19 @@ all quality gates pass.
 
 ### 1.1 OHLCV Ingestion
 
+> **Source is now flag-driven** (`TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE`, see
+> [Market data source](#market-data-source--the-market-data-engine) above). The tvkit
+> fetcher below is the **`mirror`** (legacy) path and remains the current default; the
+> canonical path is **`engine`**, which reads the Market Data Engine via the gateway proxy
+> and holds **no tvkit cookie**. The engine source shipped 2026-06-02
+> (`feature-market-data-engine` Phase 4); the original "strategy fetches tvkit" assumption
+> here is **superseded** by it (default flip pending Phase 5.x).
+
 - [x] `src/tfex_s50_multi_tf_swing/data/fetcher.py` — TFEX S50 OHLCV loader at 4H, 1H, 5m
-  - [x] Source via `tvkit` (TradingView). TFEX direct feed deferred; see Phase 1 plan §8.
-  - [x] Async batch fetch, retry on transient errors
+  - [x] **`mirror` source:** `OhlcvFetcher` fetches `tvkit` (TradingView). TFEX direct feed
+    deferred; see Phase 1 plan §8. **Superseded** for canonical use by the `engine` source
+    (`data/engine_fetcher.py:EngineOhlcvFetcher` reading the gateway proxy; no cookie).
+  - [x] Async batch fetch, retry on transient errors (both sources are `httpx.AsyncClient`)
 - [x] Storage layout:
   - [x] `data/raw/<contract>/<timeframe>.parquet` (per quarterly contract — H/M/U/Z)
   - [x] `data/cleaned/<contract>/<timeframe>.parquet` (path reserved by store; Phase 1 emits same content as raw)
@@ -130,6 +226,10 @@ all quality gates pass.
   - [x] Abnormal spread / price-gap flag (>3σ)
   - [x] Cross-timeframe consistency (5m aggregated → 1H == fetched 1H)
   - [x] **Bonus**: `validate_continuous_against_reference` cross-checks our back-adjusted continuous against TradingView's `S501!`
+    - On the **`engine`** source this cross-check is **skipped**: the engine's native
+      back-adjusted `S501!` is unbuilt, so `fetch_continuous_reference` returns an empty
+      frame and the `refresh_all` `height > 0` guard no-ops the comparison. The cross-check
+      runs only on the `mirror` source.
 - [x] Validation report saved to `data/validation/<date>.json`
 
 ### 1.5 Data Quality Notebook
@@ -142,16 +242,21 @@ all quality gates pass.
 
 ### Notes
 
-- Per the user's decision (2026-05-28), Phase 1 also writes a TimescaleDB mirror to
-  `db_tfex_s50_multi_tf_swing.ohlcv_raw` and `.ohlcv_continuous` (schema 09 in
-  `quant-infra-db`), so OpenBB / future SQL consumers can read OHLCV without a
-  Parquet round-trip. Parquet remains the source of truth.
+- Per the user's decision (2026-05-28), the **`mirror`** source writes a TimescaleDB mirror
+  to `db_tfex_s50_multi_tf_swing.ohlcv_raw` and `.ohlcv_continuous` (schema 09 in
+  `quant-infra-db`), so OpenBB / future SQL consumers can read OHLCV without a Parquet
+  round-trip. **On the `engine` source this `09` mirror is demoted to a derived local cache**
+  (the canonical store is `market_data.*` in `db_market_data`, owned by the engine); the
+  physical DROP/migration of the `09` tables is a separate `quant-infra-db` PR, deferred until
+  `engine` is the validated default. Parquet remains the durable offline cache either way.
 - The `S501!` cross-check is informational, not a hard validator failure — it surfaces
   in `ValidationReport.cross_check` so a human can eyeball divergence at roll
-  boundaries.
-- The 5-year backfill requires a real `TVKIT_AUTH_TOKEN`; anonymous tvkit sessions cap
-  at 5,000 bars per symbol. The data window is operationally gated on auth, not
-  code-gated.
+  boundaries (runs on `mirror` only; skipped on `engine`, see §1.4).
+- **5-year backfill (`mirror` only):** the legacy path requires a real `TVKIT_AUTH_TOKEN`
+  (anonymous tvkit sessions cap at 5,000 bars per symbol) — operationally gated on auth, not
+  code-gated. **On the `engine` source tfex holds no cookie at all**: the Market Data Engine
+  (the sole cookie owner) performs the backfill once, and tfex simply reads the result via
+  the gateway proxy.
 
 **Exit criteria:** continuous 4H / 1H / 5m series for ≥ 5 years of S50 history,
 validation report shows < 0.1% missing candles, rollovers visually clean in the
@@ -311,6 +416,15 @@ policy table green-flagged.
 
 > Goal: reduce bad trades by enforcing alignment with the dominant 4H trend before
 > any setup is considered. The bias engine *vetoes* trades; it does not generate them.
+
+> **Data-source dependency (4h):** this engine consumes **`4h`** bars, which the **`engine`**
+> OHLCV source currently **declines** (`EngineTimeframeUnavailableError`) because the Market
+> Data Engine has no `4h` route yet (`cagg_ohlcv_4h` unrouted; no local rollup, D10). Until
+> the engine exposes a `4h` route, `4h` is available **only on the `mirror` source**. This is
+> the one place tfex's roadmap is blocked from running fully on the canonical engine source —
+> the unblocker is the engine `4h` route follow-up (then a one-line enablement in
+> `data/engine_fetcher.py:_TF_TO_ENGINE`). See
+> [Market data source](#market-data-source--the-market-data-engine).
 
 ### 4.1 4H Trend Filter
 
@@ -474,6 +588,12 @@ verified in a fault-injection test, capital-ladder rules encoded as runtime guar
 > Goal: prove the system survives across regimes, with realistic costs. **No random
 > splits ever.**
 
+> **Data source:** walk-forward reads OHLCV from the **Market Data Engine** (the `engine`
+> source, gateway proxy) — never from a per-strategy tvkit fetch. For heavy full-history
+> columnar scans, read the engine's **Parquet snapshot** (the derived offline cache), which
+> stays usable even when infra-db / the gateway is down. See
+> [Market data source](#market-data-source--the-market-data-engine).
+
 ### 8.1 Walk-Forward Harness
 
 - [ ] `src/tfex_s50_multi_tf_swing/backtest/walk_forward.py`
@@ -515,7 +635,8 @@ max drawdown within budget, regime stability evidenced.
 ### 9.1 Real-Time Pipeline
 
 - [ ] `src/tfex_s50_multi_tf_swing/live/paper.py`
-  - [ ] Consumes live 5m bars
+  - [ ] Consumes live 5m bars **read from the Market Data Engine** (the `engine` source via
+    the gateway proxy `/api/v2/engines/market-data/*`) — never a per-strategy tvkit fetch
   - [ ] Computes signal + risk + sizing
   - [ ] Emits a *would-be* order to log, never to broker
 - [ ] Latency budget audit (signal → would-be order)
@@ -543,6 +664,12 @@ expectations within an acceptable confidence band.
 ## Phase 10 — Live Deployment
 
 > Goal: 1 contract, 100k–200k THB capital, live execution with full logging.
+
+> **Two distinct feeds, do not conflate:** market **OHLCV** (signals, regime, bias) is read
+> from the **Market Data Engine** (the `engine` source via the gateway proxy); the broker
+> API below is only for **order routing, fills, positions, and margin**. tfex still holds no
+> tvkit cookie in live mode. See
+> [Market data source](#market-data-source--the-market-data-engine).
 
 ### 10.1 Broker Integration
 
@@ -638,14 +765,26 @@ the calendar consumed by paper trading rather than coding.
 
 > Update this section as phases complete.
 
-- **Active phase:** Phase 3 — Regime Detection (Phase 2 code complete on
-  `feature/phase-2-feature-engineering`, 2026-05-29).
+- **Active phase:** Phase 4 — Higher-Timeframe Bias Engine (Phase 3 §3.1/§3.4 shipped on
+  `feature/phase-3-regime-detection`, 2026-05-29; §3.2/§3.3 deferred pending a hand-labelled
+  regime dataset).
 - **Completed sub-phases:** 0.1–0.5 (2026-05-28); Phase 1 (2026-05-28); Phase 2.1–2.6
-  (2026-05-29).
+  (2026-05-29); Phase 3 §3.1 + §3.4 (2026-05-29).
+- **Market-data engine integration:** `feature-market-data-engine` **Phase 4 (reader
+  cutover) shipped 2026-06-02** (tfex PR #6, `8756b1a`) — the
+  `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE = mirror | engine` flag + `EngineOhlcvFetcher` +
+  engine client + boundary tests. **Default is still `mirror`**; tfex end-to-end verification
+  and the default flip to `engine` are **pending Phase 5.x** (no TFEX data in the engine yet).
+  See [Market data source](#market-data-source--the-market-data-engine).
 - **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
 - **Phase 1 plan:** [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md). All five sub-phases shipped on 2026-05-28: tvkit fetcher, back-adjusted continuous via 5d volume-crossover roll, Thai session calendar, validation pipeline + `S501!` cross-check, data-quality notebook. 159 tests, ≥ 94 % coverage on `adapters/` + `data/`, mypy strict clean. TimescaleDB hypertable mirror added via `quant-infra-db` PR #9 (`ohlcv_raw`, `ohlcv_continuous`).
 - **Phase 2 plan:** [`phase-2-feature-engineering.md`](phase-2-feature-engineering.md). Shipped 2026-05-29: trend / volatility / time-of-day / market-structure / regime feature groups + the §2.6 pipeline (winsorise + trailing z-score) and a causal multi-timeframe aligner. Polars-native, look-ahead-free. 214 tests, 100 % coverage on every `features/` module (95.6 % combined), mypy strict clean. Owner CLI `scripts/build_features.py`; stability notebook scaffolded (data-gated).
-- **Blocked by:** nothing. Next: Phase 3 (Regime Detection) consumes the feature panel.
+- **Phase 3 plan:** [`phase-3-regime-detection.md`](phase-3-regime-detection.md). §3.1
+  rule-based classifier + §3.4 regime→strategy policy shipped 2026-05-29; clustering (§3.2)
+  and the LightGBM classifier (§3.3) deferred until a hand-labelled regime dataset exists.
+- **Blocked by:** nothing for the strategy roadmap. Next: Phase 4 (HTF Bias Engine) — note
+  its `4h` data needs the `mirror` source until an engine `4h` route lands (see Phase 4).
+  The engine-source default flip is the only market-data item, pending Phase 5.x verification.
 
 ---
 
