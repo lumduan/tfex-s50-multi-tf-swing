@@ -156,10 +156,19 @@ curl http://localhost:8200/health
 
 ### Phase 1 — Data refresh (owner mode)
 
-Phase 1 ships an OHLCV pipeline: TradingView (tvkit) → Parquet (`data/raw/`,
-`data/continuous/`) → optional TimescaleDB mirror in `db_tfex_s50_multi_tf_swing`.
+OHLCV is source-selected by `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE = mirror | engine`
+(default `mirror`):
 
-Required env when running in owner mode:
+- **`mirror`** (default, shown below): the legacy Phase-1 pipeline — TradingView (tvkit) →
+  Parquet (`data/raw/`, `data/continuous/`) → optional TimescaleDB mirror in
+  `db_tfex_s50_multi_tf_swing`. This is the only path that uses the tvkit cookie.
+- **`engine`**: reads the canonical **Market Data Engine** (`quant-marketdata-engine`) via
+  the gateway proxy `/api/v2/engines/market-data/*` — **no tvkit cookie**; the continuous is
+  back-adjusted locally and the `09` mirror becomes a derived cache. The default flip to
+  `engine` is pending verification. See the ROADMAP's
+  [Market data source](docs/plans/ROADMAP.md#market-data-source--the-market-data-engine).
+
+Required env when running the **`mirror`** source in owner mode:
 
 ```bash
 TFEX_S50_MULTI_TF_SWING_DB_WRITE_ENABLED=true
