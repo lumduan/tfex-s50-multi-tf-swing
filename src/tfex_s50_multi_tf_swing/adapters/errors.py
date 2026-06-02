@@ -23,4 +23,16 @@ class GatewayClientError(AdapterError):
     """
 
 
-__all__: list[str] = ["AdapterError", "GatewayClientError", "TfexS50Error"]
+class MarketDataEngineError(AdapterError):
+    """Raised when a read from the Market Data Engine fails terminally
+    (4xx response, an unparseable body, or 5xx + transport failures after all
+    retries). Carries no tvkit credential and never echoes the API key.
+    """
+
+
+__all__: list[str] = [
+    "AdapterError",
+    "GatewayClientError",
+    "MarketDataEngineError",
+    "TfexS50Error",
+]

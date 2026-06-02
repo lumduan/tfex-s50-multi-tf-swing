@@ -33,6 +33,11 @@ _MONTH_CODE_TO_MONTH: dict[str, int] = {"H": 3, "M": 6, "U": 9, "Z": 12}
 TV_CONTINUOUS_SYMBOL: str = "S501!"
 """TradingView's auto-roll front-month symbol for SET50 Futures."""
 
+ENGINE_CONTINUOUS_SYMBOL: str = "S501!"
+"""Market Data Engine symbol for the front-month continuous (read raw; tfex
+back-adjusts locally). Mirrors :data:`TV_CONTINUOUS_SYMBOL` — the engine ingests
+via tvkit and stores the bare TradingView symbol."""
+
 _S50_PREFIX: str = "S50"
 
 
@@ -54,6 +59,22 @@ def tv_symbol_for_contract(code: str) -> str:
     rest of the data layer (and the TimescaleDB ``contract`` column). For now
     the TradingView symbol is identical — but this helper exists so the
     fetcher does not embed the format string inline.
+    """
+    if not code.startswith(_S50_PREFIX):
+        raise ValueError(f"contract code must start with {_S50_PREFIX!r}, got {code!r}")
+    return code
+
+
+def engine_symbol_for_contract(code: str) -> str:
+    """Return the Market Data Engine symbol for a per-contract code.
+
+    The engine is the canonical OHLCV producer and ingests S50 futures via
+    tvkit, so its stored ``symbol`` is the bare TradingView contract code
+    (e.g. ``"S50M2026"``) — the same string the data layer uses as the
+    ``contract`` key, without the ``TFEX:`` exchange prefix the fetcher adds for
+    its own tvkit calls. This is the single localized symbol-mapping choice for
+    the ``engine`` OHLCV source; confirm it against engine seed data before the
+    first live cutover, and change it here only.
     """
     if not code.startswith(_S50_PREFIX):
         raise ValueError(f"contract code must start with {_S50_PREFIX!r}, got {code!r}")
@@ -202,8 +223,10 @@ _ONE_DAY = _td(days=1)
 
 
 __all__: list[str] = [
+    "ENGINE_CONTINUOUS_SYMBOL",
     "MONTH_CODES",
     "TV_CONTINUOUS_SYMBOL",
+    "engine_symbol_for_contract",
     "expiry_for",
     "iter_contracts",
     "next_active_contract",

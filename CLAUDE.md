@@ -185,6 +185,40 @@ shared `quant-network`.
 - Vectorised session tagging in `features/time_of_day.py` mirrors `SessionCalendar`'s
   constants; an anti-drift test asserts row-by-row agreement.
 
+### Phase 4 — OHLCV source (`TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE`)
+
+The owner-side refresh acquires OHLCV through a small factory
+(`data/sources.py:build_ohlcv_fetcher`) selected by `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE`;
+both branches return a `FetcherProtocol`, so `refresh_all` and everything downstream
+(store → continuous → validator → db_writer) are source-agnostic:
+
+- **`mirror`** (default): the unchanged Phase-1 path — `OhlcvFetcher` fetches tvkit and
+  persists the local Parquet store + the 09 TimescaleDB mirror. Requires the tvkit cookie.
+- **`engine`**: `EngineOhlcvFetcher` reads RAW per-dated-contract bars from the shared
+  **Market Data Engine** (`quant-marketdata-engine`, host `:8300`) over HTTP via
+  `adapters/market_data_engine_client.py`, **gateway-proxied** at
+  `/api/v2/engines/market-data/*`. tfex holds **no tvkit cookie** on this path. Requires
+  `..._MARKET_DATA_ENGINE_BASE_URL` (include the proxy prefix); `..._MARKET_DATA_ENGINE_API_KEY`
+  is optional (only when the engine sets its own key). This is Phase 4 of
+  `feature-market-data-engine`.
+
+On the `engine` source:
+
+- The engine is the **canonical** store; the 09 mirror
+  (`db_tfex_s50_multi_tf_swing.ohlcv_raw` / `.ohlcv_continuous`) is demoted to a **derived
+  local cache** materialised from engine-sourced bars — never a parallel ingest. The
+  physical drop/migration of the 09 tables is a **separate `quant-infra-db` PR**, deferred
+  until the engine source is the validated default.
+- **Continuous is built locally.** tfex reads raw dated contracts (`/ohlcv?adjusted=false`)
+  and back-adjusts via `data/continuous.py` (the series the strategy was validated on) —
+  the engine's native back-adjusted `S501!` is unbuilt (Phase-5 adjustment-parity), so
+  `fetch_continuous_reference` returns an empty frame and the cross-check is skipped.
+- **4h is deferred.** The engine read API serves only `1d | 1h | 5m`; `4h` (a
+  `cagg_ohlcv_4h` aggregate that is not yet routed) raises `EngineTimeframeUnavailableError`
+  before any I/O — no local rollup (Decision D10). Enabling it later is a one-line change to
+  `data/engine_fetcher.py:_TF_TO_ENGINE` once the engine exposes a 4h route.
+- Default is unchanged behaviour; rollback = leave the flag unset / `mirror`.
+
 ### Phase 3 — regime layer
 
 - `src/tfex_s50_multi_tf_swing/regime/` classifies every bar into one of five regimes

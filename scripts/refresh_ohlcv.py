@@ -24,9 +24,9 @@ from typing import Final
 from tfex_s50_multi_tf_swing.config.settings import get_settings
 from tfex_s50_multi_tf_swing.data import (
     OhlcvDbWriter,
-    OhlcvFetcher,
     ParquetStore,
     SessionCalendar,
+    build_ohlcv_fetcher,
     refresh_all,
 )
 from tfex_s50_multi_tf_swing.data.models import TIMEFRAMES, Timeframe
@@ -86,10 +86,8 @@ async def _run(args: argparse.Namespace) -> int:
     timeframes: list[Timeframe] = args.timeframe or list(TIMEFRAMES)
 
     store = ParquetStore(settings.data_dir)
-    fetcher = OhlcvFetcher(
-        auth_token=settings.tvkit_auth_token,
-        concurrency=settings.data_fetch_concurrency,
-    )
+    # Honour TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE: 'mirror' (tvkit) or 'engine'.
+    fetcher = build_ohlcv_fetcher(settings)
     calendar = SessionCalendar(roll_offset_days=settings.roll_offset_days)
 
     db_writer: OhlcvDbWriter | None = None

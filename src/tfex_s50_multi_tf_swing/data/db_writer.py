@@ -10,6 +10,14 @@ strategy-owned ``db_tfex_s50_multi_tf_swing`` database. Tables:
 Both writes are full ``INSERT … ON CONFLICT … DO UPDATE`` so re-running the
 strategy's refresh path for the same date range is idempotent — same data in,
 same row count out, same field values.
+
+Phase 4 (feature-market-data-engine): when ``OHLCV_SOURCE='engine'`` the shared
+``quant-marketdata-engine`` (canonical ``market_data.*`` schema) is the source
+of truth and this 09 mirror (``db_tfex_s50_multi_tf_swing.ohlcv_raw`` /
+``.ohlcv_continuous``) is demoted to a **derived local cache** materialised from
+engine-sourced bars — never a parallel ingest. The physical drop/migration of
+the 09 tables is a separate ``quant-infra-db`` PR, deferred until the engine
+source is the validated default (no behaviour change here).
 """
 
 from __future__ import annotations
