@@ -18,13 +18,11 @@ from pathlib import Path
 from typing import Protocol
 
 import polars as pl
-from pydantic import SecretStr
 
 from tfex_s50_multi_tf_swing.config.settings import Settings
 from tfex_s50_multi_tf_swing.data.continuous import ContinuousBuilder
 from tfex_s50_multi_tf_swing.data.db_writer import OhlcvDbWriter
 from tfex_s50_multi_tf_swing.data.errors import DataError
-from tfex_s50_multi_tf_swing.data.fetcher import OhlcvFetcher
 from tfex_s50_multi_tf_swing.data.models import (
     TIMEFRAMES,
     RollRecord,
@@ -118,10 +116,12 @@ async def refresh_all(
 
     store = store or ParquetStore(_resolve_data_dir(settings.data_dir))
     calendar = calendar or SessionCalendar(roll_offset_days=settings.roll_offset_days)
-    fetcher = fetcher or OhlcvFetcher(
-        auth_token=_resolve_auth(settings.tvkit_auth_token),
-        concurrency=settings.data_fetch_concurrency,
-    )
+    if fetcher is None:
+        # Lazy import avoids a circular import (sources → refresh for the
+        # FetcherProtocol type) and keeps the unused branch's deps unloaded.
+        from tfex_s50_multi_tf_swing.data.sources import build_ohlcv_fetcher
+
+        fetcher = build_ohlcv_fetcher(settings)
     validator = Validator(calendar=calendar)
     continuous = ContinuousBuilder(calendar=calendar, roll_offset_days=settings.roll_offset_days)
 
@@ -207,14 +207,6 @@ def _resolve_data_dir(raw: Path) -> Path:
     if isinstance(raw, Path):
         return raw
     return Path(raw)
-
-
-def _resolve_auth(token: SecretStr | None) -> SecretStr | None:
-    if token is None:
-        return None
-    if not token.get_secret_value():
-        return None
-    return token
 
 
 __all__: list[str] = ["RefreshSummary", "refresh_all"]

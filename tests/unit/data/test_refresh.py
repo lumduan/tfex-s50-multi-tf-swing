@@ -211,3 +211,28 @@ async def test_refresh_empty_data_does_not_write(tmp_path: Path) -> None:
     assert summary.raw_rows_written == 0
     assert summary.continuous_rows_written == 0
     assert not store.raw_path("S50H2026", "4h").exists()
+
+
+async def test_refresh_uses_factory_when_no_fetcher_injected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``fetcher=None`` the orchestrator builds one via the source factory."""
+    settings = _settings(tmp_path)
+    seen: list[Settings] = []
+
+    def _fake_factory(s: Settings) -> _EmptyFetcher:
+        seen.append(s)
+        return _EmptyFetcher()
+
+    # The factory is imported lazily inside refresh_all from the sources module.
+    monkeypatch.setattr("tfex_s50_multi_tf_swing.data.sources.build_ohlcv_fetcher", _fake_factory)
+    summary = await refresh_all(
+        settings=settings,
+        contracts=["S50H2026"],
+        timeframes=["4h"],
+        start=_START,
+        end=_END,
+        store=ParquetStore(tmp_path),
+    )
+    assert seen == [settings]
+    assert summary.raw_rows_written == 0
