@@ -113,7 +113,7 @@ serves the unified surface to OpenBB.
 | 1 — Data Infrastructure | **Code complete** (2026-05-28) — pending 5-year backfill |
 | 2 — Feature Engineering | **Complete** (2026-05-29) |
 | 3 — Regime Detection | **Rule baseline + policy complete** (2026-05-29) — §3.2 clustering / §3.3 LightGBM deferred |
-| 4 — Higher-TF Bias Engine | Not started |
+| 4 — Higher-TF Bias Engine | **§4.1 filter + §4.2 output complete** (2026-06-03) — §4.3 backtest deferred to Phase 5; `4h` mirror-only |
 | 5 — Setup Detection & Signals | Not started |
 | 6 — ML Probability Filter | Not started |
 | 7 — Risk Engine | Not started |
@@ -256,6 +256,32 @@ hand-labelled regime dataset exists.
 
 Plan reference: [`docs/plans/phase-3-regime-detection.md`](docs/plans/phase-3-regime-detection.md).
 
+### Phase 4 — Higher-timeframe bias
+
+Phase 4 materialises **one directional bias per 4H bar** (`long` / `short` / `neutral`) to
+**veto** counter-trend trades. It **only filters — it never generates trades.** It is a pure
+offline library leaf (`bias/`) consuming the un-normalised feature panel + the Phase 3 regime
+label; **no endpoint, no gateway change.** Composition is conservative unanimity: a directional
+bias needs every gate (EMA cross, slope, structure, VWAP) to agree **and** a healthy regime —
+`panic` / `range_low_vol` veto to `neutral`.
+
+```python
+from tfex_s50_multi_tf_swing.bias import build_bias_inputs, classify_frame, to_signals
+
+inputs = build_bias_inputs(continuous_4h, "4h")   # un-normalised panel + regime label
+labelled = classify_frame(inputs)                  # adds `bias_direction` + `bias_reasons`
+signals = to_signals(labelled)                     # one BiasSignal per 4H bar
+```
+
+Deadbands default to a strict sign test and are overridable via
+`TFEX_S50_MULTI_TF_SWING_BIAS_*` (see the config table). **`4h` is mirror-only** until the
+Market Data Engine ships a `4h` route — `bias/` is source-agnostic and never fetches tvkit.
+§4.3 (the ≥ 30% counter-trend-reduction backtest) is deferred to Phase 5; a demonstration ships
+in `scripts/bias_counter_trend_demo.py`. Visualise with `scripts/visualise_bias.py` /
+`notebooks/04_htf_bias.ipynb`.
+
+Plan reference: [`docs/plans/phase-4-htf-bias-engine.md`](docs/plans/phase-4-htf-bias-engine.md).
+
 ## Configuration reference
 
 Environment variables (prefix `TFEX_S50_MULTI_TF_SWING_*`, loaded via
@@ -273,6 +299,8 @@ Environment variables (prefix `TFEX_S50_MULTI_TF_SWING_*`, loaded via
 | `TFEX_S50_MULTI_TF_SWING_REGIME_RANGE_LOW_RV` | `0.30` | `range_low_vol` rv-percentile upper bound. |
 | `TFEX_S50_MULTI_TF_SWING_REGIME_RANGE_HIGH_RV` | `0.70` | `range_high_vol` rv-percentile reference. |
 | `TFEX_S50_MULTI_TF_SWING_REGIME_TREND_PERSIST_MIN` | `0.30` | min `\|trend_persistence\|` to call a tape trending. |
+| `TFEX_S50_MULTI_TF_SWING_BIAS_SLOPE_DEADBAND` | `0.0` | Noise band the 4H EMA slope must exceed before the bias votes directionally. |
+| `TFEX_S50_MULTI_TF_SWING_BIAS_VWAP_DEADBAND` | `0.0` | Noise band the VWAP distance must exceed before the bias votes directionally. |
 
 Never commit a real `.env` — copy `.env.example` and fill values locally.
 
