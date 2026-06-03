@@ -16,7 +16,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
     from tfex_s50_multi_tf_swing.bias.models import BiasConfig
+    from tfex_s50_multi_tf_swing.execution.models import ExecutionConfig
     from tfex_s50_multi_tf_swing.regime.models import RegimeThresholds
+    from tfex_s50_multi_tf_swing.signals.models import SignalConfig
 
 
 class Settings(BaseSettings):
@@ -93,6 +95,57 @@ class Settings(BaseSettings):
     # votes directionally; defaults to a strict sign test. Bounds mirror ``bias.BiasConfig``.
     bias_slope_deadband: float = Field(default=0.0, ge=0.0)
     bias_vwap_deadband: float = Field(default=0.0, ge=0.0)
+
+    # Phase 5 — setup-detection (signal) gate thresholds. Bounds mirror ``signals.SignalConfig``;
+    # defaults reproduce the documented strategy-design behaviour, so an unset env is a no-op.
+    signal_pullback_band: float = Field(default=1.0, ge=0.0)
+    signal_atr_contraction_max: float = Field(default=1.0, gt=0.0)
+    signal_volume_contraction_max: float = Field(default=0.5)
+    signal_squeeze_max: float = Field(default=1.0, gt=0.0)
+    signal_atr_compression_max: float = Field(default=1.0, gt=0.0)
+    signal_volume_expansion_min: float = Field(default=1.0)
+    signal_or_window: int = Field(default=15, ge=1)
+    signal_require_structure_shift: bool = True
+    signal_swing_window: int = Field(default=12, ge=2)
+
+    # Phase 5 — execution-engine knobs. Bounds mirror ``execution.ExecutionConfig``.
+    execution_k_atr_stop: float = Field(default=1.5, gt=0.0)
+    execution_partial_tp_r: float = Field(default=1.0, gt=0.0)
+    execution_partial_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
+    execution_breakeven_buffer: float = Field(default=0.0, ge=0.0)
+    execution_trail_atr_mult: float = Field(default=1.5, gt=0.0)
+    execution_time_stop_bars: int = Field(default=24, ge=1)
+    execution_max_spread_mult: float = Field(default=3.0, gt=0.0)
+
+    def signal_config(self) -> SignalConfig:
+        """Build a :class:`SignalConfig` from the configured signal fields (lazy import)."""
+        from tfex_s50_multi_tf_swing.signals.models import SignalConfig
+
+        return SignalConfig(
+            pullback_band=self.signal_pullback_band,
+            atr_contraction_max=self.signal_atr_contraction_max,
+            volume_contraction_max=self.signal_volume_contraction_max,
+            squeeze_max=self.signal_squeeze_max,
+            atr_compression_max=self.signal_atr_compression_max,
+            volume_expansion_min=self.signal_volume_expansion_min,
+            or_window=self.signal_or_window,
+            require_structure_shift=self.signal_require_structure_shift,
+            swing_window=self.signal_swing_window,
+        )
+
+    def execution_config(self) -> ExecutionConfig:
+        """Build an :class:`ExecutionConfig` from the configured execution fields (lazy import)."""
+        from tfex_s50_multi_tf_swing.execution.models import ExecutionConfig
+
+        return ExecutionConfig(
+            k_atr_stop=self.execution_k_atr_stop,
+            partial_tp_r=self.execution_partial_tp_r,
+            partial_fraction=self.execution_partial_fraction,
+            breakeven_buffer=self.execution_breakeven_buffer,
+            trail_atr_mult=self.execution_trail_atr_mult,
+            time_stop_bars=self.execution_time_stop_bars,
+            max_spread_mult=self.execution_max_spread_mult,
+        )
 
     def bias_config(self) -> BiasConfig:
         """Build a :class:`BiasConfig` from the configured bias deadband fields.

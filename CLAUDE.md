@@ -283,6 +283,36 @@ and the umbrella reader-cutover knowledge
   (the ≥ 30% counter-trend-reduction backtest) is deferred to Phase 5 (a demonstration ships in
   `scripts/bias_counter_trend_demo.py`).
 
+### Phase 5 — signal / execution / backtest layers
+
+- `src/tfex_s50_multi_tf_swing/signals/` materialises **trade setups** for three strategies — A
+  (pullback continuation), B (opening-range breakout), C (liquidity-sweep reversal). Each mirrors
+  the bias/regime shape (`classify_frame` / `classify_row` / `to_signals`) and fires only on full
+  gate agreement (never a guess). `signals/inputs.build_signal_inputs` resolves the multi-TF
+  substrate onto the **5m grid** via the Phase-2 causal aligner: it widens 5m with `1h_*` features
+  + the **1H regime** (`1h_regime`, gates which strategies may trade) and the per-4H
+  **`4h_bias_direction`** (the HTF veto), every higher-TF column availability-shifted so nothing
+  leaks. One-way dependency: `features/ + regime/ + bias/ → signals/`.
+- `src/tfex_s50_multi_tf_swing/execution/` simulates a trade from a `SetupSignal`: **next-bar-open
+  fill** (no same-bar look-ahead), a `k·ATR` stop clamped to the structure invalidation, a hybrid
+  partial-TP + trailing-remainder exit (or full TP at `partial_fraction = 1.0`), breakeven, and a
+  time stop. It is **source-agnostic** on the bars — the live/Phase-8 path passes the **raw
+  per-contract** series so roll costs stay honest (hard rule #3). **PnL is points + R only**; the
+  200-THB/pt multiplier (Phase 7 `risk/`) and the cost model (Phase 8) are out of scope.
+- `src/tfex_s50_multi_tf_swing/backtest/` reports per-strategy expectancy / profit factor / max
+  drawdown / win rate / regime-stratified PnL (R-multiples), run independently per strategy
+  (`per_strategy.run_per_strategy_backtest` wires detect → simulate → metrics). The walk-forward
+  harness + cost model + Sharpe/Sortino are Phase 8.
+- **ROADMAP-pure (like Phase 3/4):** no `risk/` wiring, no gateway `extended_data` change, no
+  FastAPI endpoint, no ML filter (a Phase-6 hook in Strategy C). Signals/execution emit
+  **sizing-ready** outputs the Phase-7 risk engine consumes. The §5 positive-expectancy exit
+  metric is deferred → **data-gated** on the 5-year backfill, like Phase 1's backfill.
+- **4h / engine-source:** A and B need the 4H bias (mirror-only); on the `engine` source `4h` is
+  absent, so `4h_bias_direction` defaults to `neutral` (A/B emit nothing) while **C** still runs.
+- **Config:** `SignalConfig` / `ExecutionConfig` (frozen, bounded), surfaced on `Settings` via
+  `TFEX_S50_MULTI_TF_SWING_SIGNAL_*` / `_EXECUTION_*` and `signal_config()` / `execution_config()`.
+  Defaults reproduce the documented strategy-design behaviour, so an unset env is a no-op.
+
 ### Public data boundary
 
 Raw OHLCV columns (`open`, `high`, `low`, `close`, `volume`) and proprietary feature
@@ -339,8 +369,8 @@ must enforce this in CI as the project grows. `data/` is gitignored.
   for log messages so level filtering saves work.
 - File-size target ≤ 400 lines; functions ≤ ~50 lines.
 - Coverage target ≥ 90% (`--cov-fail-under=90`), enforced over the modules that exist:
-  currently `adapters/`, `data/`, `features/`, `regime/`, and `bias/`. `risk/` joins the list
-  once it lands (Phase 7).
+  currently `adapters/`, `data/`, `features/`, `regime/`, `bias/`, `signals/`, `execution/`, and
+  `backtest/`. `risk/` joins the list once it lands (Phase 7).
 - Tests use `asyncio_mode = "auto"` and `--import-mode=importlib`.
 - Integration tests requiring the live `quant-infra-db` or the gateway are marked
   `@pytest.mark.infra_db` / `@pytest.mark.gateway` and self-skip when DSNs / base
@@ -360,7 +390,8 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `f
 - **Feature engineering rules:** `.claude/knowledge/feature-engineering.md`
 - **Regime detection design:** `.claude/knowledge/regime-detection.md`
 - **HTF bias engine design:** `.claude/knowledge/bias-engine.md`
-- **Strategy A/B/C specifications:** `.claude/knowledge/strategy-design.md`
+- **Strategy A/B/C specifications + Phase-5 implementation notes:** `.claude/knowledge/strategy-design.md`
+- **Phase 5 plan (signals / execution / backtest):** [`docs/plans/phase-5-setup-detection-signals.md`](docs/plans/phase-5-setup-detection-signals.md)
 - **Risk engine specification:** `.claude/knowledge/risk-engine.md`
 - **ML filter design:** `.claude/knowledge/ml-filter.md`
 - **Backtest protocol:** `.claude/knowledge/backtest-protocol.md`

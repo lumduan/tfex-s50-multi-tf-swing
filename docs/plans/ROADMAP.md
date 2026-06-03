@@ -492,47 +492,78 @@ signals (see Design Decision D9 in the Phase 4 plan).
 
 ### 5.1 Strategy A — Pullback Continuation ⭐ (primary)
 
-- [ ] `src/tfex_s50_multi_tf_swing/signals/strategy_a.py`
-  - [ ] 4H confirms uptrend (EMA20 > EMA50, positive slope, HH/HL)
-  - [ ] 1H pullback to EMA20, structure intact, volume contracting, ATR contracting
-  - [ ] 5m volatility compression detected, awaiting re-expansion
-  - [ ] 5m entry on compression breakout + VWAP reclaim + volume expansion
-- [ ] Unit tests on hand-crafted scenarios for entry, no-entry, false-trigger
+- [x] `src/tfex_s50_multi_tf_swing/signals/strategy_a.py`
+  - [x] 4H confirms direction (HTF `bias_direction` veto) + 1H regime whitelists A
+  - [x] 1H pullback to VWAP, structure intact, volume contracting, ATR contracting
+  - [x] 5m volatility compression detected, awaiting re-expansion
+  - [x] 5m entry on swing-breakout + VWAP reclaim + volume expansion
+- [x] Unit tests on hand-crafted scenarios for entry, no-entry, false-trigger
 
 ### 5.2 Strategy B — Opening Range Breakout
 
-- [ ] `src/tfex_s50_multi_tf_swing/signals/strategy_b.py`
-  - [ ] Opening range computed in first 15m (configurable)
-  - [ ] Breakout with volume expansion confirms entry
-  - [ ] HTF-aligned and not in `range_low_vol` regime
-  - [ ] Suppressed during lunch zone
+- [x] `src/tfex_s50_multi_tf_swing/signals/strategy_b.py`
+  - [x] Opening range read from `or_high_{or_window}` / `or_low_{or_window}` (default 15m)
+  - [x] Breakout with volume expansion confirms entry
+  - [x] HTF-aligned and not in `range_low_vol` regime
+  - [x] Suppressed during lunch zone (`lunch_zone_flag`)
 
 ### 5.3 Strategy C — Liquidity Sweep Reversal
 
-- [ ] `src/tfex_s50_multi_tf_swing/signals/strategy_c.py`
-  - [ ] Detect high/low sweep (stop-run pattern)
-  - [ ] Confirm reversal candle + structure shift
-  - [ ] Optional ML probability check (Phase 6) to filter fake breakouts
+- [x] `src/tfex_s50_multi_tf_swing/signals/strategy_c.py`
+  - [x] Detect high/low sweep (`liquidity_sweep_flag`; works on the engine source, no 4H bias)
+  - [x] Confirm reversal (VWAP reclaim) + structure shift
+  - [-] Optional ML probability check — **Phase 6 hook** (documented, not implemented)
 
 ### 5.4 Execution Engine (5m)
 
-- [ ] `src/tfex_s50_multi_tf_swing/execution/engine.py`
-  - [ ] Entry: breakout candle close + volume confirm + spread acceptable
-  - [ ] Stop loss: structure-aware *and* volatility-aware (`SL = entry − k·ATR`,
-    anchored to nearest invalidation level)
-  - [ ] Take profit: hybrid policy — partial TP at 1R (50%), trail remainder on
-    structure (`EMA20` or swing-low/high)
-  - [ ] Move stop to breakeven on +1R (configurable buffer to avoid noise stop-outs)
-  - [ ] Time stop: exit if no progress within `N` bars
-- [ ] Unit tests on simulated bar sequences
+- [x] `src/tfex_s50_multi_tf_swing/execution/engine.py`
+  - [x] Entry: **next-bar-open** fill + spread-proxy acceptable (no same-bar look-ahead)
+  - [x] Stop loss: structure-aware *and* volatility-aware (`SL = entry − k·ATR`,
+    clamped to the nearest invalidation level)
+  - [x] Take profit: hybrid policy — partial TP at 1R (50%), trail remainder on
+    structure (or full TP when `partial_fraction = 1.0`)
+  - [x] Move stop to breakeven on +1R (configurable buffer to avoid noise stop-outs)
+  - [x] Time stop: exit if no progress within `N` bars
+- [x] Unit tests on simulated bar sequences
 
 ### 5.5 Per-Strategy Backtest
 
-- [ ] Backtest each strategy independently before any composite is built
-- [ ] Report expectancy, profit factor, max drawdown, regime-stratified PnL
+- [x] Backtest each strategy independently before any composite is built
+  (`backtest/per_strategy.py` + `metrics.py`; harness + synthetic-trade tests + public-safe demo)
+- [x] Report expectancy, profit factor, max drawdown, regime-stratified PnL (in **R-multiples**)
+- [-] **Positive-expectancy-after-costs magnitude** — deferred → **data-gated** on the 5-year
+  backfill (blocked on a TVKIT token / engine TFEX data) + a cost model (Phase 8)
 
 **Exit criteria:** each strategy reaches positive expectancy after costs on the
-training period and is stable across at least two distinct regimes.
+training period and is stable across at least two distinct regimes — **deferred (data-gated)**,
+exactly like Phase 1's backfill and Phase 4 §4.3; the Phase-5 code + harness + demonstration ship,
+the magnitude claim awaits real data.
+
+> **Notes (2026-06-03):**
+> - **§5.1–§5.4 shipped + §5.5 harness** on `feature/phase-5-setup-detection-signals` as three
+>   new leaf packages: `signals/` (`errors`, `models`, `inputs`, `base`, `strategy_a/b/c`),
+>   `execution/` (`errors`, `models`, `engine`), `backtest/` (`errors`, `models`, `metrics`,
+>   `per_strategy`). Plan: [`phase-5-setup-detection-signals.md`](phase-5-setup-detection-signals.md).
+>   Coverage gate extended to all three (`signals/` 96–100 %, `execution/` 98–100 %, `backtest/`
+>   100 %; suite 97.17 %, 440 passed), mypy strict clean.
+> - **Multi-TF resolved on the 5m grid:** `signals/inputs.build_signal_inputs` reuses the Phase-2
+>   causal aligner to widen 5m with `1h_*` + `1h_regime` (the gating regime) and the per-4H
+>   `4h_bias_direction` (the veto) — every HTF column availability-shifted, no look-ahead
+>   (asserted by `test_inputs.py`). Each strategy mirrors the bias shape
+>   (`classify_frame`/`classify_row`/`to_signals`) and fires only on full agreement.
+> - **4h / engine-source aware:** A and B require the 4H bias (mirror-only); when the `engine`
+>   source omits `4h`, `4h_bias_direction` defaults to `neutral` so A/B emit nothing while **C**
+>   (gated on the 1H regime, not the 4H bias) still runs.
+> - **Execution** fills next-bar-open (no same-bar look-ahead), clamps `k·ATR` to the structure
+>   stop, banks a partial + trails the remainder (or full TP at `partial_fraction = 1.0`), and is
+>   source-agnostic on the bars (raw per-contract in live/Phase-8 per hard-rule #3). **PnL is
+>   points + R only** — the 200-THB/pt multiplier is Phase 7, the cost model Phase 8.
+> - **Stayed ROADMAP-pure:** no `risk/` (Phase 7), no gateway `extended_data` change (later
+>   pipeline phase), no FastAPI endpoint, no ML filter (Phase 6 hook in C). Signals/execution emit
+>   *sizing-ready* outputs the Phase-7 risk engine will consume.
+> - **Gotcha:** under mypy strict, module-level `STRATEGY_ID = "A"` infers `str`; annotated as
+>   `StrategyId`. Full `take_profit` was unreachable under the partial+trail policy, so it now
+>   fires only with `partial_fraction = 1.0` (full close at target).
 
 ---
 
@@ -799,15 +830,24 @@ the calendar consumed by paper trading rather than coding.
 
 > Update this section as phases complete.
 
-- **Active phase:** Phase 5 — Setup Detection & Signal Strategies (Phase 4 §4.1/§4.2 shipped on
-  `feature/phase-4-htf-bias-engine`, 2026-06-03; §4.3 deferred → blocked-on Phase 5).
+- **Active phase:** Phase 6 — ML Probability Filter (next). Phase 5 §5.1–§5.4 + the §5.5 harness
+  shipped on `feature/phase-5-setup-detection-signals` (2026-06-03); the §5 positive-expectancy
+  exit metric is deferred → data-gated. Phase 4 §4.3's counter-trend backtest is now unblocked
+  (the `signals/` + `execution/` + `backtest/` layers exist) but remains data-gated.
 - **Completed sub-phases:** 0.1–0.5 (2026-05-28); Phase 1 (2026-05-28); Phase 2.1–2.6
-  (2026-05-29); Phase 3 §3.1 + §3.4 (2026-05-29); Phase 4 §4.1 + §4.2 (2026-06-03).
+  (2026-05-29); Phase 3 §3.1 + §3.4 (2026-05-29); Phase 4 §4.1 + §4.2 (2026-06-03); Phase 5
+  §5.1–§5.4 + §5.5 harness (2026-06-03).
 - **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
 - **Phase 1 plan:** [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md). All five sub-phases shipped on 2026-05-28: tvkit fetcher, back-adjusted continuous via 5d volume-crossover roll, Thai session calendar, validation pipeline + `S501!` cross-check, data-quality notebook. 159 tests, ≥ 94 % coverage on `adapters/` + `data/`, mypy strict clean. TimescaleDB hypertable mirror added via `quant-infra-db` PR #9 (`ohlcv_raw`, `ohlcv_continuous`).
 - **Phase 2 plan:** [`phase-2-feature-engineering.md`](phase-2-feature-engineering.md). Shipped 2026-05-29: trend / volatility / time-of-day / market-structure / regime feature groups + the §2.6 pipeline (winsorise + trailing z-score) and a causal multi-timeframe aligner. Polars-native, look-ahead-free. 214 tests, 100 % coverage on every `features/` module (95.6 % combined), mypy strict clean. Owner CLI `scripts/build_features.py`; stability notebook scaffolded (data-gated).
 - **Phase 3 plan:** [`phase-3-regime-detection.md`](phase-3-regime-detection.md). §3.1 rule-based classifier + §3.4 regime→strategy policy shipped 2026-05-29; clustering (§3.2) and the LightGBM classifier (§3.3) deferred until a hand-labelled regime dataset exists.
 - **Phase 4 plan:** [`phase-4-htf-bias-engine.md`](phase-4-htf-bias-engine.md). §4.1 4H trend filter + §4.2 `BiasSignal` output / visualisation shipped 2026-06-03 as the `bias/` leaf package (conservative-unanimity gates, reuses `regime/` for the volatility-healthy veto, source-agnostic). §4.3 is a demonstration only; the ≥ 30% counter-trend-reduction exit metric is deferred to Phase 5. `4h` stays **mirror-only** until an engine `4h` route lands.
+- **Phase 5 plan:** [`phase-5-setup-detection-signals.md`](phase-5-setup-detection-signals.md).
+  §5.1–§5.4 (Strategies A/B/C + the 5m execution engine) and the §5.5 per-strategy backtest
+  harness shipped 2026-06-03 as the `signals/` + `execution/` + `backtest/` leaf packages
+  (gated by the Phase-4 bias veto + Phase-3 regime policy on a causally aligned 5m frame). PnL is
+  in points + R; the §5 positive-expectancy magnitude claim and the ML filter (Strategy C) are
+  deferred to data/Phase 6/8. Stayed ROADMAP-pure (no `risk/`, no gateway change).
 - **Market-data engine integration:** `feature-market-data-engine` **Phase 4 (reader
   cutover) shipped 2026-06-02** (tfex PR #6, `8756b1a`) — the
   `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE = mirror | engine` flag + `EngineOhlcvFetcher` +
