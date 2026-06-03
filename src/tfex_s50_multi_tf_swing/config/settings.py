@@ -15,6 +15,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
+    from tfex_s50_multi_tf_swing.bias.models import BiasConfig
     from tfex_s50_multi_tf_swing.regime.models import RegimeThresholds
 
 
@@ -87,6 +88,25 @@ class Settings(BaseSettings):
     regime_range_low_rv: float = Field(default=0.30, ge=0.0, le=1.0)
     regime_range_high_rv: float = Field(default=0.70, ge=0.0, le=1.0)
     regime_trend_persist_min: float = Field(default=0.30, ge=0.0, le=1.0)
+
+    # Phase 4 — HTF bias-engine deadbands. Noise bands a gate must exceed before it
+    # votes directionally; defaults to a strict sign test. Bounds mirror ``bias.BiasConfig``.
+    bias_slope_deadband: float = Field(default=0.0, ge=0.0)
+    bias_vwap_deadband: float = Field(default=0.0, ge=0.0)
+
+    def bias_config(self) -> BiasConfig:
+        """Build a :class:`BiasConfig` from the configured bias deadband fields.
+
+        Imported lazily so :mod:`config.settings` stays a light leaf module and does not
+        pull the feature/regime/bias graph in at import time. ``neutral_regimes`` keeps its
+        documented default (the two no-trade regimes).
+        """
+        from tfex_s50_multi_tf_swing.bias.models import BiasConfig
+
+        return BiasConfig(
+            slope_deadband=self.bias_slope_deadband,
+            vwap_deadband=self.bias_vwap_deadband,
+        )
 
     def regime_thresholds(self) -> RegimeThresholds:
         """Build a :class:`RegimeThresholds` from the configured regime fields.

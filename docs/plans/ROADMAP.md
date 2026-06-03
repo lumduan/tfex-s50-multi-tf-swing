@@ -419,35 +419,69 @@ policy table green-flagged.
 
 > **Data-source dependency (4h):** this engine consumes **`4h`** bars, which the **`engine`**
 > OHLCV source currently **declines** (`EngineTimeframeUnavailableError`) because the Market
-> Data Engine has no `4h` route yet (`cagg_ohlcv_4h` unrouted; no local rollup, D10). Until
-> the engine exposes a `4h` route, `4h` is available **only on the `mirror` source**. This is
-> the one place tfex's roadmap is blocked from running fully on the canonical engine source —
-> the unblocker is the engine `4h` route follow-up (then a one-line enablement in
-> `data/engine_fetcher.py:_TF_TO_ENGINE`). See
+> Data Engine has no `4h` route yet (`cagg_ohlcv_4h` unrouted; no local rollup — D10). Until
+> the engine exposes a `4h` route, `4h` is available **only on the `mirror` source**. The
+> `bias/` package itself is **source-agnostic** — it consumes already-loaded 4H frames and
+> never fetches tvkit / picks a fetcher. This is the one place tfex's roadmap is blocked from
+> running fully on the canonical engine source; the unblocker is an engine `4h` route follow-up
+> (then a one-line enablement in `data/engine_fetcher.py:_TF_TO_ENGINE`, a
+> `quant-marketdata-engine` change out of scope for this strategy). See
 > [Market data source](#market-data-source--the-market-data-engine).
 
 ### 4.1 4H Trend Filter
 
-- [ ] `src/tfex_s50_multi_tf_swing/bias/htf.py`
-  - [ ] `ema20_above_ema50` (Long) / `ema20_below_ema50` (Short)
-  - [ ] Positive vs negative EMA slope
-  - [ ] HH/HL structure check
-  - [ ] Price relative to HTF VWAP
-  - [ ] Volatility-healthy gate (not in `panic`, not in `range_low_vol`)
+- [x] `src/tfex_s50_multi_tf_swing/bias/htf.py`
+  - [x] `ema20_above_ema50` (Long) / `ema20_below_ema50` (Short)
+  - [x] Positive vs negative EMA slope
+  - [x] HH/HL structure check
+  - [x] Price relative to HTF VWAP
+  - [x] Volatility-healthy gate (not in `panic`, not in `range_low_vol`) — reuses `regime/`
 
 ### 4.2 Bias Output
 
-- [ ] `BiasSignal` Pydantic model: `direction: Literal["long", "short", "neutral"]`,
+- [x] `BiasSignal` Pydantic model: `direction: Literal["long", "short", "neutral"]`,
   `reasons: list[str]`
-- [ ] CLI/notebook to visualise bias overlaid on 4H chart
+- [x] CLI/notebook to visualise bias overlaid on 4H chart
+  (`scripts/visualise_bias.py`, `notebooks/04_htf_bias.ipynb`)
 
 ### 4.3 Backtest of Bias Filter
 
-- [ ] Compare baseline naive strategy with/without bias filter on the same period
-- [ ] Confirm bias filter improves expectancy or reduces drawdown
+- [~] Compare baseline naive strategy with/without bias filter on the same period
+  — **demonstration only** (`scripts/bias_counter_trend_demo.py`, naive candidate proxy)
+- [-] Confirm bias filter improves expectancy or reduces drawdown — **deferred → blocked-on
+  Phase 5** (needs `signals/` + `execution/` + `backtest/`, which do not exist yet)
 
-**Exit criteria:** bias signal materialised per 4H bar; histogram of trades shows
-≥ 30% reduction in counter-trend entries vs the unfiltered baseline.
+**Exit criteria:** bias signal materialised per 4H bar ✓; the ≥ 30% counter-trend-reduction
+histogram vs the *real* unfiltered baseline is **deferred to Phase 5** — the §4.3 demonstration
+proves the veto mechanism on a naive candidate proxy, but the magnitude claim awaits real
+signals (see Design Decision D9 in the Phase 4 plan).
+
+> **Notes (2026-06-03):**
+> - **§4.1 + §4.2 shipped** on `feature/phase-4-htf-bias-engine`. New leaf package
+>   `src/tfex_s50_multi_tf_swing/bias/` (`errors.py`, `models.py`, `htf.py`, `__init__.py`)
+>   consuming the **un-normalised** Phase 2 panel + the Phase 3 regime label. Plan:
+>   [`phase-4-htf-bias-engine.md`](phase-4-htf-bias-engine.md). Coverage gate extended to
+>   `bias/` (100% on the new module; suite 96.6% overall, 343 passed).
+> - **Composition is conservative unanimity:** a directional bias needs *every* gate to agree
+>   (EMA cross + slope + structure + VWAP) **and** a healthy regime; any disagreement, tie EMA,
+>   null `structure`, or insufficient lookback → `neutral` (never a directional guess). It
+>   **vetoes, never generates** — `BiasSignal` carries `direction` + one auditable `reasons`
+>   string per gate.
+> - **Reuses `regime/`:** the volatility-healthy gate reads the *same* regime classification
+>   (`panic` / `range_low_vol` → `neutral`), never re-derived; deadbands live in `BiasConfig`
+>   (`TFEX_S50_MULTI_TF_SWING_BIAS_*` via `Settings.bias_config()`), no threshold hard-coded.
+> - **§4.3 deferred** (mirrors the Phase 3 deferral honesty): no faked backtest. The demo
+>   script computes a counter-trend-reduction % on a naive 1-bar-momentum candidate proxy and
+>   saves a **public-safe** artifact (counts only, no raw OHLCV) to `results/static/bias/`.
+> - **Stayed ROADMAP-pure:** no FastAPI endpoint, no gateway `extended_data` change, no
+>   `risk/`/`signals/` wiring — those packages do not exist (Phases 5 / 7). `bias/` is the veto
+>   contract they will consume; it imports nothing downstream and never fetches tvkit.
+> - **4h-source constraint restated:** `4h` is mirror-only today (engine declines it before any
+>   I/O, no local rollup); `bias/` is source-agnostic so the cutover to an engine `4h` route is
+>   a one-line `_TF_TO_ENGINE` change with zero bias-layer impact.
+> - **Gotcha:** `structure` (HH/HL/LH/LL) is frequently null on sparse synthetic pivots, so the
+>   classifier tests build bias-input frames per-branch directly (one row per gate) rather than
+>   relying on the pipeline to emit a specific label — the same approach Phase 3 used.
 
 ---
 
@@ -765,26 +799,23 @@ the calendar consumed by paper trading rather than coding.
 
 > Update this section as phases complete.
 
-- **Active phase:** Phase 4 — Higher-Timeframe Bias Engine (Phase 3 §3.1/§3.4 shipped on
-  `feature/phase-3-regime-detection`, 2026-05-29; §3.2/§3.3 deferred pending a hand-labelled
-  regime dataset).
+- **Active phase:** Phase 5 — Setup Detection & Signal Strategies (Phase 4 §4.1/§4.2 shipped on
+  `feature/phase-4-htf-bias-engine`, 2026-06-03; §4.3 deferred → blocked-on Phase 5).
 - **Completed sub-phases:** 0.1–0.5 (2026-05-28); Phase 1 (2026-05-28); Phase 2.1–2.6
-  (2026-05-29); Phase 3 §3.1 + §3.4 (2026-05-29).
+  (2026-05-29); Phase 3 §3.1 + §3.4 (2026-05-29); Phase 4 §4.1 + §4.2 (2026-06-03).
+- **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
+- **Phase 1 plan:** [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md). All five sub-phases shipped on 2026-05-28: tvkit fetcher, back-adjusted continuous via 5d volume-crossover roll, Thai session calendar, validation pipeline + `S501!` cross-check, data-quality notebook. 159 tests, ≥ 94 % coverage on `adapters/` + `data/`, mypy strict clean. TimescaleDB hypertable mirror added via `quant-infra-db` PR #9 (`ohlcv_raw`, `ohlcv_continuous`).
+- **Phase 2 plan:** [`phase-2-feature-engineering.md`](phase-2-feature-engineering.md). Shipped 2026-05-29: trend / volatility / time-of-day / market-structure / regime feature groups + the §2.6 pipeline (winsorise + trailing z-score) and a causal multi-timeframe aligner. Polars-native, look-ahead-free. 214 tests, 100 % coverage on every `features/` module (95.6 % combined), mypy strict clean. Owner CLI `scripts/build_features.py`; stability notebook scaffolded (data-gated).
+- **Phase 3 plan:** [`phase-3-regime-detection.md`](phase-3-regime-detection.md). §3.1 rule-based classifier + §3.4 regime→strategy policy shipped 2026-05-29; clustering (§3.2) and the LightGBM classifier (§3.3) deferred until a hand-labelled regime dataset exists.
+- **Phase 4 plan:** [`phase-4-htf-bias-engine.md`](phase-4-htf-bias-engine.md). §4.1 4H trend filter + §4.2 `BiasSignal` output / visualisation shipped 2026-06-03 as the `bias/` leaf package (conservative-unanimity gates, reuses `regime/` for the volatility-healthy veto, source-agnostic). §4.3 is a demonstration only; the ≥ 30% counter-trend-reduction exit metric is deferred to Phase 5. `4h` stays **mirror-only** until an engine `4h` route lands.
 - **Market-data engine integration:** `feature-market-data-engine` **Phase 4 (reader
   cutover) shipped 2026-06-02** (tfex PR #6, `8756b1a`) — the
   `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE = mirror | engine` flag + `EngineOhlcvFetcher` +
   engine client + boundary tests. **Default is still `mirror`**; tfex end-to-end verification
   and the default flip to `engine` are **pending Phase 5.x** (no TFEX data in the engine yet).
   See [Market data source](#market-data-source--the-market-data-engine).
-- **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
-- **Phase 1 plan:** [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md). All five sub-phases shipped on 2026-05-28: tvkit fetcher, back-adjusted continuous via 5d volume-crossover roll, Thai session calendar, validation pipeline + `S501!` cross-check, data-quality notebook. 159 tests, ≥ 94 % coverage on `adapters/` + `data/`, mypy strict clean. TimescaleDB hypertable mirror added via `quant-infra-db` PR #9 (`ohlcv_raw`, `ohlcv_continuous`).
-- **Phase 2 plan:** [`phase-2-feature-engineering.md`](phase-2-feature-engineering.md). Shipped 2026-05-29: trend / volatility / time-of-day / market-structure / regime feature groups + the §2.6 pipeline (winsorise + trailing z-score) and a causal multi-timeframe aligner. Polars-native, look-ahead-free. 214 tests, 100 % coverage on every `features/` module (95.6 % combined), mypy strict clean. Owner CLI `scripts/build_features.py`; stability notebook scaffolded (data-gated).
-- **Phase 3 plan:** [`phase-3-regime-detection.md`](phase-3-regime-detection.md). §3.1
-  rule-based classifier + §3.4 regime→strategy policy shipped 2026-05-29; clustering (§3.2)
-  and the LightGBM classifier (§3.3) deferred until a hand-labelled regime dataset exists.
-- **Blocked by:** nothing for the strategy roadmap. Next: Phase 4 (HTF Bias Engine) — note
-  its `4h` data needs the `mirror` source until an engine `4h` route lands (see Phase 4).
-  The engine-source default flip is the only market-data item, pending Phase 5.x verification.
+- **Blocked by:** nothing for the strategy roadmap. Next: Phase 5 (Setup Detection) gates each
+  strategy on the Phase 4 bias + Phase 3 regime policy.
 
 ---
 

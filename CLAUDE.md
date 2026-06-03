@@ -254,6 +254,35 @@ and the umbrella reader-cutover knowledge
 - §3.2 (clustering notebook) and §3.3 (LightGBM) are deferred until a hand-labelled regime
   dataset exists; the rule baseline is their weak-supervision target.
 
+### Phase 4 — HTF bias layer
+
+> Note: this is the strategy's own Phase 4 (HTF Bias Engine) — **distinct** from the
+> "Phase 4 — OHLCV source" section above, which is `feature-market-data-engine` Phase 4.
+
+- `src/tfex_s50_multi_tf_swing/bias/` materialises **one directional bias per 4H bar**
+  (`long` / `short` / `neutral`) used to **veto** counter-trend trades. It **only filters — it
+  never generates trades.** One-way dependency: `features/ + regime/ → bias/`; it imports
+  nothing downstream (`signals/`, `execution/`, `risk/`, `backtest/`, `api/`).
+- Like `regime/`, it consumes the **un-normalised** feature panel
+  (`FeatureConfig(normalise=False)`) — z-scored `ema_slope_*` / `dist_from_vwap` destroy the
+  absolute signs the gates need. `build_bias_inputs()` bridges from a continuous OHLCV frame
+  (reusing `regime.build_regime_inputs` + `regime.classify_frame`, so the volatility-healthy
+  gate reads the *same* regime label, never re-derived); `classify_frame()` is the vectorised
+  entry point (appends `bias_direction` + `bias_reasons`), `classify_row()` the scalar one, and
+  `to_signals()` materialises one `BiasSignal` per bar.
+- **Conservative unanimity:** a directional bias requires *every* gate to agree (EMA cross +
+  slope + structure HH/HL·LH/LL + VWAP side) **and** a healthy regime (`panic` /
+  `range_low_vol` veto to `neutral`). Any disagreement, tie EMA, null `structure`, or
+  insufficient lookback → `neutral`. `BiasSignal` carries `direction` + one auditable `reasons`
+  string per gate.
+- **Deadbands live only in config**: `BiasConfig` (frozen Pydantic), overridable via
+  `TFEX_S50_MULTI_TF_SWING_BIAS_*` and `Settings.bias_config()`. No threshold hard-coded.
+- **`bias/` is source-agnostic.** It consumes already-loaded 4H frames and never fetches tvkit
+  / picks a fetcher. **`4h` is mirror-only** today — the `engine` source declines it
+  (`EngineTimeframeUnavailableError`, no local rollup; see the OHLCV-source section). §4.3
+  (the ≥ 30% counter-trend-reduction backtest) is deferred to Phase 5 (a demonstration ships in
+  `scripts/bias_counter_trend_demo.py`).
+
 ### Public data boundary
 
 Raw OHLCV columns (`open`, `high`, `low`, `close`, `volume`) and proprietary feature
@@ -310,8 +339,8 @@ must enforce this in CI as the project grows. `data/` is gitignored.
   for log messages so level filtering saves work.
 - File-size target ≤ 400 lines; functions ≤ ~50 lines.
 - Coverage target ≥ 90% (`--cov-fail-under=90`), enforced over the modules that exist:
-  currently `adapters/`, `data/`, `features/`, and `regime/`. `risk/` joins the list once
-  it lands (Phase 7).
+  currently `adapters/`, `data/`, `features/`, `regime/`, and `bias/`. `risk/` joins the list
+  once it lands (Phase 7).
 - Tests use `asyncio_mode = "auto"` and `--import-mode=importlib`.
 - Integration tests requiring the live `quant-infra-db` or the gateway are marked
   `@pytest.mark.infra_db` / `@pytest.mark.gateway` and self-skip when DSNs / base
@@ -330,6 +359,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `f
 - **Strategy overview & rationale:** `.claude/knowledge/strategy-overview.md`
 - **Feature engineering rules:** `.claude/knowledge/feature-engineering.md`
 - **Regime detection design:** `.claude/knowledge/regime-detection.md`
+- **HTF bias engine design:** `.claude/knowledge/bias-engine.md`
 - **Strategy A/B/C specifications:** `.claude/knowledge/strategy-design.md`
 - **Risk engine specification:** `.claude/knowledge/risk-engine.md`
 - **ML filter design:** `.claude/knowledge/ml-filter.md`
