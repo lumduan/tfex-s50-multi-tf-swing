@@ -114,7 +114,7 @@ serves the unified surface to OpenBB.
 | 2 — Feature Engineering | **Complete** (2026-05-29) |
 | 3 — Regime Detection | **Rule baseline + policy complete** (2026-05-29) — §3.2 clustering / §3.3 LightGBM deferred |
 | 4 — Higher-TF Bias Engine | **§4.1 filter + §4.2 output complete** (2026-06-03) — §4.3 backtest deferred to Phase 5; `4h` mirror-only |
-| 5 — Setup Detection & Signals | Not started |
+| 5 — Setup Detection & Signals | **§5.1–§5.4 + §5.5 harness complete** (2026-06-03) — Strategies A/B/C + 5m execution engine + per-strategy backtest (`signals/`, `execution/`, `backtest/`); positive-expectancy exit metric + ML filter deferred (data / Phase 6) |
 | 6 — ML Probability Filter | Not started |
 | 7 — Risk Engine | Not started |
 | 8 — Walk-Forward Backtest | Not started |

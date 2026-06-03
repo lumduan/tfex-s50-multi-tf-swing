@@ -75,6 +75,9 @@ addopts = [
     "--cov=src/tfex_s50_multi_tf_swing/features",
     "--cov=src/tfex_s50_multi_tf_swing/regime",
     "--cov=src/tfex_s50_multi_tf_swing/bias",
+    "--cov=src/tfex_s50_multi_tf_swing/signals",
+    "--cov=src/tfex_s50_multi_tf_swing/execution",
+    "--cov=src/tfex_s50_multi_tf_swing/backtest",
     "--cov-report=term-missing",
     "--cov-fail-under=90",
     "--import-mode=importlib",
@@ -91,6 +94,9 @@ source = [
     "src/tfex_s50_multi_tf_swing/features",
     "src/tfex_s50_multi_tf_swing/regime",
     "src/tfex_s50_multi_tf_swing/bias",
+    "src/tfex_s50_multi_tf_swing/signals",
+    "src/tfex_s50_multi_tf_swing/execution",
+    "src/tfex_s50_multi_tf_swing/backtest",
 ]
 branch = false
 

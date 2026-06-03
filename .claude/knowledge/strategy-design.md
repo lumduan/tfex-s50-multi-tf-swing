@@ -100,3 +100,33 @@ structure.
   correlated risk.
 - Do not trade outside the regime's allowed strategy set.
 - Do not place stops at obvious round numbers — funds hunt those.
+
+## Phase 5 implementation notes (2026-06-03)
+
+The specifications above are realised by the `signals/`, `execution/`, and `backtest/` packages
+(ROADMAP §5.1–§5.5). How the design maps to code:
+
+- **One aligned 5m frame.** `signals/inputs.build_signal_inputs` reuses the Phase-2 causal aligner
+  to put everything on the 5m grid: `1h_*` features + the **1H regime** (`1h_regime`, which gates
+  the strategy whitelist via `regime.policy.regime_to_strategies`) and the per-4H
+  **`4h_bias_direction`** (the HTF veto). Higher-TF columns are availability-shifted, so no setup
+  reads an HTF bar before it closed.
+- **Gate thresholds live in `SignalConfig`** (frozen, env-overridable via
+  `TFEX_S50_MULTI_TF_SWING_SIGNAL_*`): A's pullback band + ATR/volume contraction caps + 5m
+  compression ceilings; the shared `volume_expansion_min`; B's `or_window`; C's
+  `require_structure_shift`; the `swing_window` for the causal swing-low/high stop anchor. No
+  threshold is hard-coded at a call site.
+- **A / B require the 4H bias; C does not.** C is gated on the 1H `range_high_vol` regime + a
+  confirmed `liquidity_sweep_flag` + a VWAP-reclaim reversal (and an optional structure shift), so
+  it runs on the `engine` OHLCV source where `4h` is unavailable. The ML `P(fake_breakout)` filter
+  is a **Phase-6 hook**, not implemented.
+- **Execution = `execution/engine.simulate_trade`:** next-bar-open fill, `k·ATR` stop clamped to
+  the structure invalidation, partial-TP (50 %) + trailing remainder (or full TP at
+  `partial_fraction = 1.0`), breakeven at +1R, time stop. PnL is in **points + R-multiples** only
+  — the 200-THB/pt sizing (Phase 7 `risk/`) and the cost model (Phase 8) are out of scope.
+- **Sizing-ready, not sized.** A `SetupSignal` carries direction + entry + structure stop; a
+  `Trade` carries the R-multiple. These are exactly the inputs the Phase-7 risk engine consumes —
+  Phase 5 stays ROADMAP-pure (no `risk/`, no gateway `extended_data` change, no endpoint).
+- **Per-strategy backtest** (`backtest/`) reports expectancy / profit factor / max-DD / win-rate /
+  regime-stratified PnL independently per strategy. The positive-expectancy *magnitude* claim is
+  deferred → data-gated on the 5-year backfill + a cost model.
