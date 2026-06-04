@@ -346,6 +346,40 @@ and the umbrella reader-cutover knowledge
   `scripts/ml_filter_demo.py` (synthetic, public-safe) or the lifecycle playbook
   `.claude/playbooks/ml-filter-lifecycle.md`. Design notes: `.claude/knowledge/ml-filter.md`.
 
+### Phase 7 — risk layer
+
+- `src/tfex_s50_multi_tf_swing/risk/` turns the Phase-5 *sizing-ready* outputs
+  (`signals.SetupSignal` / `execution.Trade`) into **contract-sized, risk-guarded decisions**. It is
+  a leaf: one-way dependency `signals/ + execution/ + regime/ → risk/`; it imports nothing
+  downstream (`backtest/`, `live/`, `api/`). Modules: `errors`, `models`, `sizing`, `limits`,
+  `killswitch`, `ladder`, `decision`.
+- **Position sizing** (`sizing.py`): `position_size = account_risk / (stop_distance × multiplier)`,
+  floored to whole contracts (a sub-1 result is **0**, never rounded up). The S50 multiplier is the
+  single named constant `S50_MULTIPLIER = Decimal("200")` (TFEX hard rule #1) — never re-typed
+  inline. **Money is `Decimal` end-to-end** (equity, risk amount, stop distance); `rv_percentile`
+  stays `float`. Volatility scaling (§7.3) reuses the existing regime label
+  (`regime.policy.regime_to_size_multiplier`, never re-derived): halve above `high_vol_percentile`,
+  no-trade in `panic` (`panic_no_trade`, stricter than the regime policy's ≤ 50 %, configurable).
+- **Daily & streak limits** (`limits.py`) are an **immutable session reducer**: `register_outcome`
+  folds a closed `TradeOutcome` into a new `SessionRiskState` (deterministic; session date injected,
+  no wall-clock). Halts on `-2R` cumulative, 3 consecutive losses, or the trade-count cap. The
+  **no-averaging-down** (hard rule #4) and **no-widen-stop** guards raise `RiskLimitError`.
+- **Kill switch** (`killswitch.py`, hard rule #8 — overrides everything): abnormal spread / latency
+  breach / broker-disconnect / market-halt / daily-loss-hit / manual env flag ⇒ flatten + halt. The
+  manual override is `TFEX_S50_MULTI_TF_SWING_RISK_KILL_SWITCH_ENGAGED`; the **admin endpoint is
+  deferred** until `api/` lands (Phases 3–6 added no FastAPI endpoint). `KillSwitchState` is the
+  typed contract a future live/API layer consumes.
+- **Capital-deployment ladder** (`ladder.py`, §7.5): `max_contracts_for_stage` caps by stage
+  (paper 0 / micro-live 1 / validated 2 / scale 4), falling back to the highest rung the evidence
+  supports. "Scale only on statistical evidence, never on confidence" — the live-evidence inputs are
+  **data-gated** (Phase 9/10).
+- `decision.evaluate_entry` is the pure orchestrator (kill-switch-first → session limits → sizing →
+  ladder cap) that **Phase 8 will drive**; it is not wired into `backtest/` yet (ROADMAP-pure, like
+  Phases 3–6). **Config:** `RiskConfig` (frozen, bounded) surfaced on `Settings` via
+  `TFEX_S50_MULTI_TF_SWING_RISK_*` + `risk_config()`; an unset env reproduces the documented
+  defaults. Design notes: `.claude/knowledge/risk-engine.md`; operations:
+  `.claude/playbooks/risk-kill-switch-and-ladder.md`.
+
 ### Public data boundary
 
 Raw OHLCV columns (`open`, `high`, `low`, `close`, `volume`) and proprietary feature
@@ -403,7 +437,7 @@ must enforce this in CI as the project grows. `data/` is gitignored.
 - File-size target ≤ 400 lines; functions ≤ ~50 lines.
 - Coverage target ≥ 90% (`--cov-fail-under=90`), enforced over the modules that exist:
   currently `adapters/`, `data/`, `features/`, `regime/`, `bias/`, `signals/`, `execution/`,
-  `backtest/`, and `ml/`. `risk/` joins the list once it lands (Phase 7).
+  `backtest/`, `ml/`, and `risk/` (added in Phase 7).
 - Tests use `asyncio_mode = "auto"` and `--import-mode=importlib`.
 - Integration tests requiring the live `quant-infra-db` or the gateway are marked
   `@pytest.mark.infra_db` / `@pytest.mark.gateway` and self-skip when DSNs / base
@@ -427,6 +461,8 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `f
 - **Phase 5 plan (signals / execution / backtest):** [`docs/plans/phase-5-setup-detection-signals.md`](docs/plans/phase-5-setup-detection-signals.md)
 - **Phase 6 plan (ML probability filter):** [`docs/plans/phase-6-ml-probability-filter.md`](docs/plans/phase-6-ml-probability-filter.md)
 - **Risk engine specification:** `.claude/knowledge/risk-engine.md`
+- **Phase 7 plan (risk engine):** [`docs/plans/phase-7-risk-engine.md`](docs/plans/phase-7-risk-engine.md)
+- **Kill-switch / capital-ladder operations:** `.claude/playbooks/risk-kill-switch-and-ladder.md`
 - **ML filter design + lifecycle:** `.claude/knowledge/ml-filter.md`, `.claude/playbooks/ml-filter-lifecycle.md`
 - **Backtest protocol:** `.claude/knowledge/backtest-protocol.md`
 - **Development workflow:** `.claude/playbooks/development-workflow.md`

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, cast
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from tfex_s50_multi_tf_swing.execution.models import ExecutionConfig
     from tfex_s50_multi_tf_swing.ml.models import MLFilterConfig
     from tfex_s50_multi_tf_swing.regime.models import RegimeThresholds
+    from tfex_s50_multi_tf_swing.risk.models import RiskConfig
     from tfex_s50_multi_tf_swing.signals.models import SignalConfig
 
 
@@ -127,6 +128,27 @@ class Settings(BaseSettings):
     ml_threshold_fake_breakout: float = Field(default=0.50, ge=0.0, le=1.0)
     ml_seed: int = Field(default=42, ge=0)
 
+    # Phase 7 — risk engine. Bounds mirror ``risk.models.RiskConfig``; an unset env reproduces the
+    # documented risk-engine spec, so the defaults are a no-op. ``risk_deployment_stage`` is typed
+    # ``str`` here (validated against the Literal when ``risk_config()`` builds ``RiskConfig``).
+    risk_per_trade_pct: float = Field(default=0.01, gt=0.0, le=1.0)
+    risk_daily_loss_limit_r: float = Field(default=2.0, gt=0.0)
+    risk_max_consecutive_losses: int = Field(default=3, ge=1)
+    risk_max_trades_per_day: int = Field(default=6, ge=1)
+    risk_high_vol_percentile: float = Field(default=0.70, ge=0.0, le=1.0)
+    risk_high_vol_size_factor: float = Field(default=0.5, ge=0.0, le=1.0)
+    risk_panic_no_trade: bool = True
+    risk_kill_switch_engaged: bool = False
+    risk_spread_anomaly_mult: float = Field(default=5.0, gt=0.0)
+    risk_latency_budget_ms: float = Field(default=500.0, gt=0.0)
+    risk_max_error_rate: float = Field(default=0.10, ge=0.0, le=1.0)
+    risk_deployment_stage: str = "paper"
+    risk_micro_live_max_contracts: int = Field(default=1, ge=0)
+    risk_validated_max_contracts: int = Field(default=2, ge=0)
+    risk_scale_max_contracts: int = Field(default=4, ge=0)
+    risk_validated_min_months_live: float = Field(default=6.0, ge=0.0)
+    risk_scale_min_months_live: float = Field(default=12.0, ge=0.0)
+
     def signal_config(self) -> SignalConfig:
         """Build a :class:`SignalConfig` from the configured signal fields (lazy import)."""
         from tfex_s50_multi_tf_swing.signals.models import SignalConfig
@@ -172,6 +194,35 @@ class Settings(BaseSettings):
             threshold_continuation=self.ml_threshold_continuation,
             threshold_fake_breakout=self.ml_threshold_fake_breakout,
             seed=self.ml_seed,
+        )
+
+    def risk_config(self) -> RiskConfig:
+        """Build a :class:`RiskConfig` from the configured ``risk_*`` fields (lazy import).
+
+        Imported lazily so :mod:`config.settings` stays a light leaf module and does not pull the
+        risk/regime/signals graph in at import time. ``risk_deployment_stage`` is validated against
+        the :data:`DeploymentStage` literal here (an unknown stage fails loud at construction).
+        """
+        from tfex_s50_multi_tf_swing.risk.models import DeploymentStage, RiskConfig
+
+        return RiskConfig(
+            risk_per_trade_pct=self.risk_per_trade_pct,
+            daily_loss_limit_r=self.risk_daily_loss_limit_r,
+            max_consecutive_losses=self.risk_max_consecutive_losses,
+            max_trades_per_day=self.risk_max_trades_per_day,
+            high_vol_percentile=self.risk_high_vol_percentile,
+            high_vol_size_factor=self.risk_high_vol_size_factor,
+            panic_no_trade=self.risk_panic_no_trade,
+            kill_switch_engaged=self.risk_kill_switch_engaged,
+            spread_anomaly_mult=self.risk_spread_anomaly_mult,
+            latency_budget_ms=self.risk_latency_budget_ms,
+            max_error_rate=self.risk_max_error_rate,
+            deployment_stage=cast(DeploymentStage, self.risk_deployment_stage),
+            micro_live_max_contracts=self.risk_micro_live_max_contracts,
+            validated_max_contracts=self.risk_validated_max_contracts,
+            scale_max_contracts=self.risk_scale_max_contracts,
+            validated_min_months_live=self.risk_validated_min_months_live,
+            scale_min_months_live=self.risk_scale_min_months_live,
         )
 
     def bias_config(self) -> BiasConfig:
