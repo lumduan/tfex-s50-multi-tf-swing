@@ -313,6 +313,39 @@ and the umbrella reader-cutover knowledge
   `TFEX_S50_MULTI_TF_SWING_SIGNAL_*` / `_EXECUTION_*` and `signal_config()` / `execution_config()`.
   Defaults reproduce the documented strategy-design behaviour, so an unset env is a no-op.
 
+### Phase 6 — ML probability filter layer
+
+- `src/tfex_s50_multi_tf_swing/ml/` is a **filter, never a strategy** (hard rule #7): a LightGBM
+  model gates already-fired rule-based setups, it never generates trades. Two targets —
+  `P(trend_continuation)` gates A / B (keep when **high**), `P(fake_breakout)` gates C (keep when
+  **low**). The package is a leaf: `signals/ → ml/`; it imports nothing downstream.
+- **Default OFF and backward-compatible.** The gate (`ml.filter.filter_signals`) returns a subset of
+  the **same** `SetupSignal` instances in their original order, and is the **identity function**
+  whenever it is disabled, has no loaded model, lacks a strategy's per-target model, or finds no
+  aligned-frame row for a signal's time. With `TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED=false`
+  (the default) Phase-5 behaviour is reproduced byte-for-byte.
+- **Wired only at the backtest/detect layer** (ROADMAP-pure like Phase 5): an optional, default-`None`
+  `ml_filter` parameter on `backtest.per_strategy.run_per_strategy_backtest`. Bind the config + a
+  loaded bundle into a closure / `functools.partial` over `filter_signals`. No FastAPI endpoint, no
+  live wiring, no `extended_data` / gateway change.
+- **Pipeline (owner-side, data-gated):** `ml.labels.label_triple_barrier` (TP / SL / time barriers
+  over forward 5m bars) → `ml.features.build_feature_frame` (a fixed, ordered `FEATURE_COLUMNS`
+  vector; categoricals to a fixed small-int space with a `0` unknown bucket; missing numerics →
+  `NaN` for LightGBM) → `ml.training.walk_forward_train` (**anchored walk-forward only**, never a
+  random split; per-fold OOS metrics; a feature-importance audit rejects a model where one feature
+  carries `> max_importance_share` of gain) → `ml.store.save_model` / `load_bundle` (LightGBM text
+  dump + a `ModelCard` JSON sidecar; the loader is **thread-safe and cached by (path, mtimes)** so a
+  booster is parsed once). No raw OHLCV is ever a feature, and no model binary / secret is committed
+  (`data/models/`, `data/labels/` are gitignored). LightGBM is imported lazily.
+- **Config:** `MLFilterConfig` (frozen, thresholds ∈ [0, 1]) surfaced on `Settings` via
+  `TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED` / `_ML_MODEL_DIR` / `_ML_THRESHOLD_CONTINUATION` /
+  `_ML_THRESHOLD_FAKE_BREAKOUT` / `_ML_SEED` and `ml_filter_config()`. **Determinism:** fits set
+  `deterministic=True` + single-thread + a fixed seed. A future live/async caller must run inference
+  via `asyncio.to_thread` (CPU-bound; no async path exists yet). The real trained models + the
+  out-of-sample A/B magnitude claim are **data-gated** on the 5-year backfill. Train/evaluate via
+  `scripts/ml_filter_demo.py` (synthetic, public-safe) or the lifecycle playbook
+  `.claude/playbooks/ml-filter-lifecycle.md`. Design notes: `.claude/knowledge/ml-filter.md`.
+
 ### Public data boundary
 
 Raw OHLCV columns (`open`, `high`, `low`, `close`, `volume`) and proprietary feature
@@ -369,8 +402,8 @@ must enforce this in CI as the project grows. `data/` is gitignored.
   for log messages so level filtering saves work.
 - File-size target ≤ 400 lines; functions ≤ ~50 lines.
 - Coverage target ≥ 90% (`--cov-fail-under=90`), enforced over the modules that exist:
-  currently `adapters/`, `data/`, `features/`, `regime/`, `bias/`, `signals/`, `execution/`, and
-  `backtest/`. `risk/` joins the list once it lands (Phase 7).
+  currently `adapters/`, `data/`, `features/`, `regime/`, `bias/`, `signals/`, `execution/`,
+  `backtest/`, and `ml/`. `risk/` joins the list once it lands (Phase 7).
 - Tests use `asyncio_mode = "auto"` and `--import-mode=importlib`.
 - Integration tests requiring the live `quant-infra-db` or the gateway are marked
   `@pytest.mark.infra_db` / `@pytest.mark.gateway` and self-skip when DSNs / base
@@ -392,8 +425,9 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `f
 - **HTF bias engine design:** `.claude/knowledge/bias-engine.md`
 - **Strategy A/B/C specifications + Phase-5 implementation notes:** `.claude/knowledge/strategy-design.md`
 - **Phase 5 plan (signals / execution / backtest):** [`docs/plans/phase-5-setup-detection-signals.md`](docs/plans/phase-5-setup-detection-signals.md)
+- **Phase 6 plan (ML probability filter):** [`docs/plans/phase-6-ml-probability-filter.md`](docs/plans/phase-6-ml-probability-filter.md)
 - **Risk engine specification:** `.claude/knowledge/risk-engine.md`
-- **ML filter design:** `.claude/knowledge/ml-filter.md`
+- **ML filter design + lifecycle:** `.claude/knowledge/ml-filter.md`, `.claude/playbooks/ml-filter-lifecycle.md`
 - **Backtest protocol:** `.claude/knowledge/backtest-protocol.md`
 - **Development workflow:** `.claude/playbooks/development-workflow.md`
 - **Gateway onboarding checklist:** `.claude/playbooks/onboarding-to-gateway.md`
