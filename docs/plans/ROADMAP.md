@@ -622,30 +622,33 @@ profit factor vs unfiltered; no regime sees a worse performance with the filter 
 
 ### 7.1 Position Sizing
 
-- [ ] `src/tfex_s50_multi_tf_swing/risk/sizing.py`
-  - [ ] `position_size = account_risk / (stop_distance × multiplier)`
-  - [ ] S50 multiplier: 200 THB per point
-  - [ ] Default `account_risk = 1%` of equity
-  - [ ] Volatility scaling: wider stop ⇒ smaller position
-- [ ] Unit tests against the worked example
+- [x] `src/tfex_s50_multi_tf_swing/risk/sizing.py`
+  - [x] `position_size = account_risk / (stop_distance × multiplier)` (floored; sub-1 ⇒ 0)
+  - [x] S50 multiplier: 200 THB per point (`S50_MULTIPLIER`, single named constant)
+  - [x] Default `account_risk = 1%` of equity (`RiskConfig.risk_per_trade_pct`)
+  - [x] Volatility scaling: wider stop ⇒ smaller position (+ §7.3 regime/percentile factor)
+- [x] Unit tests against the worked example
   (100k equity, 1% risk, 5-pt stop ⇒ 1 contract)
 
 ### 7.2 Daily & Streak Limits
 
-- [ ] `src/tfex_s50_multi_tf_swing/risk/limits.py`
-  - [ ] Daily loss limit: `-2R` → stop trading today
-  - [ ] Consecutive loss limit: 3 in a row → pause until next session
-  - [ ] Daily trade-count cap (configurable)
+- [x] `src/tfex_s50_multi_tf_swing/risk/limits.py` (immutable session reducer)
+  - [x] Daily loss limit: `-2R` → stop trading today
+  - [x] Consecutive loss limit: 3 in a row → pause until next session
+  - [x] Daily trade-count cap (configurable)
+  - [x] **Bonus:** no-averaging-down (hard rule #4) + no-widen-stop guards, tested
 
 ### 7.3 Volatility Scaling
 
-- [ ] Scale size down when realised volatility breaches a high percentile
-- [ ] Optional no-trade gate at extreme percentile (panic regime)
+- [x] Scale size down when realised volatility breaches a high percentile (`high_vol_size_factor`)
+- [x] No-trade gate at extreme percentile / panic regime (`panic_no_trade`, reuses `regime/`)
 
 ### 7.4 Kill Switch
 
-- [ ] Abnormal spread / latency / market-halt detection → flatten all positions
-- [ ] Manual kill switch via env var or admin endpoint
+- [x] Abnormal spread / latency / broker-disconnect / market-halt / daily-loss → flatten + halt
+- [x] Manual kill switch via env flag (`TFEX_S50_MULTI_TF_SWING_RISK_KILL_SWITCH_ENGAGED`)
+- [-] Admin endpoint — **deferred** until the `api/` package lands (Phases 3–6 added no FastAPI
+  endpoint; `KillSwitchState` is the typed contract a future live/API layer consumes)
 
 ### 7.5 Capital Deployment Ladder
 
@@ -656,8 +659,34 @@ profit factor vs unfiltered; no regime sees a worse performance with the filter 
 | Validated | 2 contracts | Statistical evidence (≥ 6 months live) |
 | Scale | Scale carefully | Stable for 6+ months in production |
 
-**Exit criteria:** risk engine unit-tested across boundary cases, kill switch
-verified in a fault-injection test, capital-ladder rules encoded as runtime guards.
+**Exit criteria:** risk engine unit-tested across boundary cases ✓, kill switch
+verified in a fault-injection test ✓, capital-ladder rules encoded as runtime guards ✓.
+
+> **Notes (2026-06-04):**
+> - **§7.1–§7.5 shipped** on `feature/phase-7-risk-engine` as the `risk/` leaf package
+>   (`errors`, `models`, `sizing`, `limits`, `killswitch`, `ladder`, `decision`). Plan:
+>   [`phase-7-risk-engine.md`](phase-7-risk-engine.md). Coverage gate extended to `risk/`
+>   (100 % on the module; suite 97.8 %, 584 passed), mypy strict clean.
+> - **Money is Decimal end-to-end** (equity, risk amount, stop distance, the `S50_MULTIPLIER =
+>   200`); `rv_percentile` stays float. Sizing floors to whole contracts (`ROUND_DOWN`); a sub-1
+>   result is 0 (no trade), never rounded up.
+> - **Volatility scaling reuses the regime label** (`regime.policy.regime_to_size_multiplier`,
+>   never re-derived): halve above `high_vol_percentile`, no-trade in `panic` (stricter than the
+>   regime policy's ≤ 50 %, configurable via `panic_no_trade`).
+> - **Session limits are an immutable reducer** (`register_outcome` → new `SessionRiskState`),
+>   deterministic with the session date injected; the no-averaging-down (#4) and no-widen-stop
+>   guards raise `RiskLimitError`.
+> - **Kill switch overrides everything** (hard rule #8) — `decision.evaluate_entry` checks it
+>   first; any trigger flattens + halts. Manual override is an **env flag**; the **admin endpoint
+>   is deferred** to `api/`.
+> - **Capital ladder is a runtime guard** (`max_contracts_for_stage`): paper 0 / micro-live 1 /
+>   validated 2 / scale 4, capped down when evidence is absent. The "≥ 6 months live" evidence is
+>   **data-gated** (Phase 9/10) — the guard encodes the rule, the inputs arrive later.
+> - **Stayed ROADMAP-pure (like Phases 3–6):** no gateway `extended_data` change, no FastAPI
+>   endpoint, no `live/` wiring, no walk-forward. `decision.evaluate_entry` is a pure entry point
+>   **not** wired into `backtest/`; Phase 8 will drive it.
+> - **Gotcha:** `RiskConfig.risk_per_trade_pct` is a float ratio; it is converted via
+>   `Decimal(str(pct))` before multiplying equity so the sizing arithmetic stays exact Decimal.
 
 ---
 
@@ -843,19 +872,28 @@ the calendar consumed by paper trading rather than coding.
 
 > Update this section as phases complete.
 
-- **Active phase:** Phase 7 — Risk Engine (next). **Phase 6 — ML Probability Filter machinery
-  shipped 2026-06-04** on `feature/phase-6-ml-probability-filter` (the `ml/` package: triple-barrier
-  labels, feature extraction, walk-forward LightGBM trainer + importance audit, versioned cached
-  store, the default-OFF gate wired at `run_per_strategy_backtest(ml_filter=…)`). 100 % coverage on
-  `ml/`, mypy strict. Default OFF (`TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED=false`) ⇒ Phase-5
-  behaviour byte-for-byte; **real trained models + the out-of-sample A/B magnitude claim remain
-  data-gated** on the 5-year backfill. Phase 5 §5.1–§5.4 + the §5.5 harness shipped 2026-06-03; the
-  §5 positive-expectancy exit metric is deferred → data-gated. Phase 4 §4.3's counter-trend backtest
-  is now unblocked (the `signals/` + `execution/` + `backtest/` layers exist) but remains data-gated.
+- **Active phase:** Phase 8 — Walk-Forward Backtest (next). **Phase 7 — Risk Engine shipped
+  2026-06-04** on `feature/phase-7-risk-engine` (the `risk/` leaf package: position sizing on the
+  `S50_MULTIPLIER = 200` constant, daily-loss / streak / trade-count limits as an immutable session
+  reducer, no-averaging-down + no-widen-stop guards, regime/volatility scaling reusing `regime/`,
+  the kill switch — hard rule #8, env-flag override — and the capital-deployment ladder as a runtime
+  guard, plus a pure `decision.evaluate_entry` orchestrator). 100 % coverage on `risk/`, mypy strict,
+  suite 97.8 %. Stayed ROADMAP-pure (no `extended_data`/gateway change, no FastAPI endpoint, no
+  `live/` wiring, no walk-forward). **Deferred:** the kill-switch **admin endpoint** (needs `api/`)
+  and the ladder's **"≥ 6 months live" evidence actuals** (data-gated on Phase 9/10).
+- **Phase 6 — ML Probability Filter machinery shipped 2026-06-04** on
+  `feature/phase-6-ml-probability-filter` (the `ml/` package: triple-barrier labels, feature
+  extraction, walk-forward LightGBM trainer + importance audit, versioned cached store, the
+  default-OFF gate wired at `run_per_strategy_backtest(ml_filter=…)`). 100 % coverage on `ml/`, mypy
+  strict. Default OFF (`TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED=false`) ⇒ Phase-5 behaviour
+  byte-for-byte; **real trained models + the out-of-sample A/B magnitude claim remain data-gated** on
+  the 5-year backfill. Phase 5 §5.1–§5.4 + the §5.5 harness shipped 2026-06-03; the §5
+  positive-expectancy exit metric is deferred → data-gated. Phase 4 §4.3's counter-trend backtest is
+  now unblocked (the `signals/` + `execution/` + `backtest/` layers exist) but remains data-gated.
 - **Completed sub-phases:** 0.1–0.5 (2026-05-28); Phase 1 (2026-05-28); Phase 2.1–2.6
   (2026-05-29); Phase 3 §3.1 + §3.4 (2026-05-29); Phase 4 §4.1 + §4.2 (2026-06-03); Phase 5
   §5.1–§5.4 + §5.5 harness (2026-06-03); Phase 6 §6.1–§6.4 machinery, default-OFF (2026-06-04;
-  magnitude data-gated).
+  magnitude data-gated); Phase 7 §7.1–§7.5 (2026-06-04; admin endpoint + ladder evidence deferred).
 - **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
 - **Phase 1 plan:** [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md). All five sub-phases shipped on 2026-05-28: tvkit fetcher, back-adjusted continuous via 5d volume-crossover roll, Thai session calendar, validation pipeline + `S501!` cross-check, data-quality notebook. 159 tests, ≥ 94 % coverage on `adapters/` + `data/`, mypy strict clean. TimescaleDB hypertable mirror added via `quant-infra-db` PR #9 (`ohlcv_raw`, `ohlcv_continuous`).
 - **Phase 2 plan:** [`phase-2-feature-engineering.md`](phase-2-feature-engineering.md). Shipped 2026-05-29: trend / volatility / time-of-day / market-structure / regime feature groups + the §2.6 pipeline (winsorise + trailing z-score) and a causal multi-timeframe aligner. Polars-native, look-ahead-free. 214 tests, 100 % coverage on every `features/` module (95.6 % combined), mypy strict clean. Owner CLI `scripts/build_features.py`; stability notebook scaffolded (data-gated).
@@ -875,14 +913,24 @@ the calendar consumed by paper trading rather than coding.
   Default OFF (`TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED`) ⇒ Phase-5 behaviour byte-for-byte;
   real trained models + the OOS A/B magnitude claim are data-gated on the 5-year backfill.
   Stayed ROADMAP-pure (no `risk/`, no API endpoint, no `extended_data`/gateway change).
+- **Phase 7 plan:** [`phase-7-risk-engine.md`](phase-7-risk-engine.md).
+  §7.1–§7.5 shipped 2026-06-04 as the `risk/` leaf package (sizing on the `S50_MULTIPLIER = 200`
+  constant, daily-loss / streak / trade-count limits, no-averaging-down + no-widen-stop guards,
+  regime/volatility scaling reusing `regime/`, the kill switch with an env-flag override, the
+  capital-deployment ladder runtime guard, and a pure `decision.evaluate_entry` orchestrator).
+  100 % coverage on `risk/`, mypy strict; `RiskConfig` surfaced on `Settings`
+  (`TFEX_S50_MULTI_TF_SWING_RISK_*` + `risk_config()`). The kill-switch admin endpoint is deferred
+  to `api/`; the ladder's live-evidence actuals are data-gated (Phase 9/10). Stayed ROADMAP-pure
+  (no `extended_data`/gateway change, no FastAPI endpoint, no `live/` wiring, no walk-forward).
 - **Market-data engine integration:** `feature-market-data-engine` **Phase 4 (reader
   cutover) shipped 2026-06-02** (tfex PR #6, `8756b1a`) — the
   `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE = mirror | engine` flag + `EngineOhlcvFetcher` +
   engine client + boundary tests. **Default is still `mirror`**; tfex end-to-end verification
   and the default flip to `engine` are **pending Phase 5.x** (no TFEX data in the engine yet).
   See [Market data source](#market-data-source--the-market-data-engine).
-- **Blocked by:** nothing for the strategy roadmap. Next: Phase 5 (Setup Detection) gates each
-  strategy on the Phase 4 bias + Phase 3 regime policy.
+- **Blocked by:** nothing for the strategy roadmap. Next: Phase 8 (Walk-Forward Backtest) drives
+  the Phase-7 risk engine over Phase-5 signals/execution with a cost model and anchored
+  walk-forward windows.
 
 ---
 
