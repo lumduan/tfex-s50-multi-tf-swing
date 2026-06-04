@@ -68,3 +68,36 @@ def test_run_per_strategy_backtest_no_signals() -> None:
     )
     assert metrics.n_trades == 0
     assert metrics.strategy_id == "B"
+
+
+def test_ml_filter_none_is_noop() -> None:
+    detected = [_signal(0), _signal(1)]
+    baseline = run_per_strategy_backtest(
+        lambda _inputs: detected,
+        pl.DataFrame({"time": []}),
+        _bars(6),
+        strategy_id="A",
+        config=ExecutionConfig(time_stop_bars=1),
+    )
+    explicit = run_per_strategy_backtest(
+        lambda _inputs: detected,
+        pl.DataFrame({"time": []}),
+        _bars(6),
+        strategy_id="A",
+        config=ExecutionConfig(time_stop_bars=1),
+        ml_filter=None,
+    )
+    assert explicit == baseline
+
+
+def test_ml_filter_applied_before_simulation() -> None:
+    # A gate that drops every signal → zero trades, proving the hook runs pre-simulation.
+    metrics = run_per_strategy_backtest(
+        lambda _inputs: [_signal(0), _signal(1)],
+        pl.DataFrame({"time": []}),
+        _bars(6),
+        strategy_id="A",
+        config=ExecutionConfig(time_stop_bars=1),
+        ml_filter=lambda _signals, _inputs: [],
+    )
+    assert metrics.n_trades == 0

@@ -572,34 +572,47 @@ the magnitude claim awaits real data.
 > Goal: use ML as a **filter**, not a strategy. The model produces probabilities
 > that gate existing rule-based signals; it does not generate trades.
 
+> **Status (2026-06-04): machinery shipped, default-OFF; magnitude data-gated.**
+> The `ml/` package (labels, features, walk-forward LightGBM trainer, versioned store,
+> the gate) ships behind `TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED` (default `false`):
+> with the toggle off — or no model artifact present — the filter is the identity
+> function and Phase-5 behaviour is byte-for-byte unchanged. Wired only at the
+> backtest/detect layer (`run_per_strategy_backtest(ml_filter=…)`), ROADMAP-pure like
+> Phase 5 (no `risk/`, no API endpoint, no `extended_data` change). Tested ≥ 90 %
+> (100 %) on `ml/`, mypy strict. **Real trained models + the out-of-sample A/B
+> expectancy claim remain data-gated on the 5-year backfill** (same gate as Phases
+> 1/3/4/5). Plan: [`phase-6-ml-probability-filter.md`](phase-6-ml-probability-filter.md).
+
 ### 6.1 Labelled Dataset
 
-- [ ] `src/tfex_s50_multi_tf_swing/ml/labels.py`
-  - [ ] Triple-barrier labelling (TP / SL / time)
-  - [ ] Per-setup labels for `trend_continuation` and `fake_breakout`
-  - [ ] Saved to `data/labels/` keyed by `(setup_id, label_type)`
+- [x] `src/tfex_s50_multi_tf_swing/ml/labels.py`
+  - [x] Triple-barrier labelling (TP / SL / time)
+  - [x] Per-setup labels for `trend_continuation` and `fake_breakout`
+  - [x] Saved to `data/labels/` keyed by `(setup_id, label_type)` (`save_labels`)
 
 ### 6.2 LightGBM Models
 
-- [ ] `src/tfex_s50_multi_tf_swing/ml/models.py`
-  - [ ] `P(trend_continuation)` — gates Strategy A & B
-  - [ ] `P(fake_breakout)` — gates Strategy C
-  - [ ] Walk-forward training schedule, no random splits
-- [ ] Feature importance audit; no single feature dominating
+- [x] `src/tfex_s50_multi_tf_swing/ml/models.py` + `training.py` / `store.py`
+  - [x] `P(trend_continuation)` — gates Strategy A & B
+  - [x] `P(fake_breakout)` — gates Strategy C
+  - [x] Walk-forward training schedule, no random splits
+- [x] Feature importance audit; no single feature dominating (`audit_importance`)
 
 ### 6.3 Filter Integration
 
-- [ ] Threshold per model documented (e.g., `P(continuation) > 0.55`)
-- [ ] A/B compare strategies with vs without ML filter
+- [x] Threshold per model documented + configurable (`P(continuation) ≥ 0.55`, `P(fake) ≤ 0.50`)
+- [x] A/B compare harness with vs without ML filter (`ml_filter` param; `scripts/ml_filter_demo.py`)
+  - the out-of-sample *magnitude* claim is **data-gated** on the 5-year backfill
 
 ### 6.4 Anti-Overfit Discipline
 
-- [ ] Walk-forward only — never random split
-- [ ] Out-of-sample metrics required to ship
-- [ ] No Deep Learning at this stage (see Non-goals)
+- [x] Walk-forward only — never random split (asserted in tests)
+- [x] Out-of-sample metrics computed per fold; required to ship a real model — **data-gated**
+- [x] No Deep Learning at this stage (see Non-goals)
 
 **Exit criteria:** ML-filtered strategies improve out-of-sample expectancy or
 profit factor vs unfiltered; no regime sees a worse performance with the filter on.
+*(Machinery in place; the exit metric is data-gated on the 5-year backfill.)*
 
 ---
 
@@ -830,13 +843,19 @@ the calendar consumed by paper trading rather than coding.
 
 > Update this section as phases complete.
 
-- **Active phase:** Phase 6 — ML Probability Filter (next). Phase 5 §5.1–§5.4 + the §5.5 harness
-  shipped on `feature/phase-5-setup-detection-signals` (2026-06-03); the §5 positive-expectancy
-  exit metric is deferred → data-gated. Phase 4 §4.3's counter-trend backtest is now unblocked
-  (the `signals/` + `execution/` + `backtest/` layers exist) but remains data-gated.
+- **Active phase:** Phase 7 — Risk Engine (next). **Phase 6 — ML Probability Filter machinery
+  shipped 2026-06-04** on `feature/phase-6-ml-probability-filter` (the `ml/` package: triple-barrier
+  labels, feature extraction, walk-forward LightGBM trainer + importance audit, versioned cached
+  store, the default-OFF gate wired at `run_per_strategy_backtest(ml_filter=…)`). 100 % coverage on
+  `ml/`, mypy strict. Default OFF (`TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED=false`) ⇒ Phase-5
+  behaviour byte-for-byte; **real trained models + the out-of-sample A/B magnitude claim remain
+  data-gated** on the 5-year backfill. Phase 5 §5.1–§5.4 + the §5.5 harness shipped 2026-06-03; the
+  §5 positive-expectancy exit metric is deferred → data-gated. Phase 4 §4.3's counter-trend backtest
+  is now unblocked (the `signals/` + `execution/` + `backtest/` layers exist) but remains data-gated.
 - **Completed sub-phases:** 0.1–0.5 (2026-05-28); Phase 1 (2026-05-28); Phase 2.1–2.6
   (2026-05-29); Phase 3 §3.1 + §3.4 (2026-05-29); Phase 4 §4.1 + §4.2 (2026-06-03); Phase 5
-  §5.1–§5.4 + §5.5 harness (2026-06-03).
+  §5.1–§5.4 + §5.5 harness (2026-06-03); Phase 6 §6.1–§6.4 machinery, default-OFF (2026-06-04;
+  magnitude data-gated).
 - **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
 - **Phase 1 plan:** [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md). All five sub-phases shipped on 2026-05-28: tvkit fetcher, back-adjusted continuous via 5d volume-crossover roll, Thai session calendar, validation pipeline + `S501!` cross-check, data-quality notebook. 159 tests, ≥ 94 % coverage on `adapters/` + `data/`, mypy strict clean. TimescaleDB hypertable mirror added via `quant-infra-db` PR #9 (`ohlcv_raw`, `ohlcv_continuous`).
 - **Phase 2 plan:** [`phase-2-feature-engineering.md`](phase-2-feature-engineering.md). Shipped 2026-05-29: trend / volatility / time-of-day / market-structure / regime feature groups + the §2.6 pipeline (winsorise + trailing z-score) and a causal multi-timeframe aligner. Polars-native, look-ahead-free. 214 tests, 100 % coverage on every `features/` module (95.6 % combined), mypy strict clean. Owner CLI `scripts/build_features.py`; stability notebook scaffolded (data-gated).
@@ -848,6 +867,14 @@ the calendar consumed by paper trading rather than coding.
   (gated by the Phase-4 bias veto + Phase-3 regime policy on a causally aligned 5m frame). PnL is
   in points + R; the §5 positive-expectancy magnitude claim and the ML filter (Strategy C) are
   deferred to data/Phase 6/8. Stayed ROADMAP-pure (no `risk/`, no gateway change).
+- **Phase 6 plan:** [`phase-6-ml-probability-filter.md`](phase-6-ml-probability-filter.md).
+  §6.1–§6.4 machinery shipped 2026-06-04 as the `ml/` leaf package (triple-barrier labels,
+  fixed-vector feature extraction, anchored walk-forward LightGBM trainer + importance audit,
+  versioned thread-safe-cached store, and the default-OFF gate `ml.filter.filter_signals`
+  wired at `run_per_strategy_backtest(ml_filter=…)`). 100 % coverage on `ml/`, mypy strict.
+  Default OFF (`TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED`) ⇒ Phase-5 behaviour byte-for-byte;
+  real trained models + the OOS A/B magnitude claim are data-gated on the 5-year backfill.
+  Stayed ROADMAP-pure (no `risk/`, no API endpoint, no `extended_data`/gateway change).
 - **Market-data engine integration:** `feature-market-data-engine` **Phase 4 (reader
   cutover) shipped 2026-06-02** (tfex PR #6, `8756b1a`) — the
   `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE = mirror | engine` flag + `EngineOhlcvFetcher` +

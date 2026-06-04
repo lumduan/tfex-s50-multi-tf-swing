@@ -17,6 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 if TYPE_CHECKING:
     from tfex_s50_multi_tf_swing.bias.models import BiasConfig
     from tfex_s50_multi_tf_swing.execution.models import ExecutionConfig
+    from tfex_s50_multi_tf_swing.ml.models import MLFilterConfig
     from tfex_s50_multi_tf_swing.regime.models import RegimeThresholds
     from tfex_s50_multi_tf_swing.signals.models import SignalConfig
 
@@ -117,6 +118,15 @@ class Settings(BaseSettings):
     execution_time_stop_bars: int = Field(default=24, ge=1)
     execution_max_spread_mult: float = Field(default=3.0, gt=0.0)
 
+    # Phase 6 — ML probability filter. Default OFF: an unset env reproduces Phase-5
+    # behaviour byte-for-byte. Bounds mirror ``ml.models.MLFilterConfig``; thresholds
+    # are in [0, 1]. ``ml_model_dir`` points at the (gitignored) artifact directory.
+    ml_filter_enabled: bool = False
+    ml_model_dir: Path = Path("./data/models")
+    ml_threshold_continuation: float = Field(default=0.55, ge=0.0, le=1.0)
+    ml_threshold_fake_breakout: float = Field(default=0.50, ge=0.0, le=1.0)
+    ml_seed: int = Field(default=42, ge=0)
+
     def signal_config(self) -> SignalConfig:
         """Build a :class:`SignalConfig` from the configured signal fields (lazy import)."""
         from tfex_s50_multi_tf_swing.signals.models import SignalConfig
@@ -145,6 +155,23 @@ class Settings(BaseSettings):
             trail_atr_mult=self.execution_trail_atr_mult,
             time_stop_bars=self.execution_time_stop_bars,
             max_spread_mult=self.execution_max_spread_mult,
+        )
+
+    def ml_filter_config(self) -> MLFilterConfig:
+        """Build an :class:`MLFilterConfig` from the configured ``ml_*`` fields (lazy import).
+
+        Imported lazily so :mod:`config.settings` stays a light leaf module and does not pull
+        the ML graph (numpy / lightgbm) in at import time. With ``ml_filter_enabled`` unset the
+        returned config is disabled and the filter is a no-op.
+        """
+        from tfex_s50_multi_tf_swing.ml.models import MLFilterConfig
+
+        return MLFilterConfig(
+            enabled=self.ml_filter_enabled,
+            model_dir=self.ml_model_dir,
+            threshold_continuation=self.ml_threshold_continuation,
+            threshold_fake_breakout=self.ml_threshold_fake_breakout,
+            seed=self.ml_seed,
         )
 
     def bias_config(self) -> BiasConfig:
