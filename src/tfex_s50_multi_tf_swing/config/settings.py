@@ -7,6 +7,7 @@ be accidentally logged via ``%r``.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Self, cast
@@ -15,6 +16,8 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
+    from tfex_s50_multi_tf_swing.backtest.costs import CostModel
+    from tfex_s50_multi_tf_swing.backtest.models import WalkForwardConfig
     from tfex_s50_multi_tf_swing.bias.models import BiasConfig
     from tfex_s50_multi_tf_swing.execution.models import ExecutionConfig
     from tfex_s50_multi_tf_swing.ml.models import MLFilterConfig
@@ -149,6 +152,25 @@ class Settings(BaseSettings):
     risk_validated_min_months_live: float = Field(default=6.0, ge=0.0)
     risk_scale_min_months_live: float = Field(default=12.0, ge=0.0)
 
+    # Phase 8 — walk-forward harness. Bounds mirror ``backtest.models.WalkForwardConfig``; an unset
+    # env reproduces the documented defaults. ``walk_forward_mode`` is typed ``str`` here (validated
+    # against the ``WindowMode`` Literal when ``walk_forward_config()`` builds the model).
+    walk_forward_mode: str = "anchored"
+    walk_forward_train_span_days: int = Field(default=1095, ge=1)
+    walk_forward_test_span_days: int = Field(default=365, ge=1)
+    walk_forward_step_days: int = Field(default=365, ge=1)
+    walk_forward_start_equity: Decimal = Field(default=Decimal("200000"), gt=0)
+    walk_forward_seed: int = Field(default=42, ge=0)
+    walk_forward_refit_ml: bool = False
+
+    # Phase 8 — cost model. Bounds mirror ``backtest.costs.CostModel``; THB fees are Decimal.
+    cost_commission_per_contract: Decimal = Field(default=Decimal("85"), ge=0)
+    cost_clearing_fee_per_contract: Decimal = Field(default=Decimal("1"), ge=0)
+    cost_slippage_atr_mult: float = Field(default=0.05, ge=0.0)
+    cost_illiquid_session_mult: float = Field(default=2.0, ge=1.0)
+    cost_tick_size: Decimal = Field(default=Decimal("0.1"), gt=0)
+    cost_spread_ticks: float = Field(default=1.0, ge=0.0)
+
     def signal_config(self) -> SignalConfig:
         """Build a :class:`SignalConfig` from the configured signal fields (lazy import)."""
         from tfex_s50_multi_tf_swing.signals.models import SignalConfig
@@ -223,6 +245,37 @@ class Settings(BaseSettings):
             scale_max_contracts=self.risk_scale_max_contracts,
             validated_min_months_live=self.risk_validated_min_months_live,
             scale_min_months_live=self.risk_scale_min_months_live,
+        )
+
+    def walk_forward_config(self) -> WalkForwardConfig:
+        """Build a :class:`WalkForwardConfig` from the configured ``walk_forward_*`` fields.
+
+        Imported lazily so :mod:`config.settings` stays a light leaf module. ``walk_forward_mode``
+        is validated against the :data:`WindowMode` literal here (an unknown mode fails loud).
+        """
+        from tfex_s50_multi_tf_swing.backtest.models import WalkForwardConfig, WindowMode
+
+        return WalkForwardConfig(
+            mode=cast(WindowMode, self.walk_forward_mode),
+            train_span_days=self.walk_forward_train_span_days,
+            test_span_days=self.walk_forward_test_span_days,
+            step_days=self.walk_forward_step_days,
+            start_equity=self.walk_forward_start_equity,
+            seed=self.walk_forward_seed,
+            refit_ml=self.walk_forward_refit_ml,
+        )
+
+    def cost_model(self) -> CostModel:
+        """Build a :class:`CostModel` from the configured ``cost_*`` fields (lazy import)."""
+        from tfex_s50_multi_tf_swing.backtest.costs import CostModel
+
+        return CostModel(
+            commission_per_contract=self.cost_commission_per_contract,
+            clearing_fee_per_contract=self.cost_clearing_fee_per_contract,
+            slippage_atr_mult=self.cost_slippage_atr_mult,
+            illiquid_session_mult=self.cost_illiquid_session_mult,
+            tick_size=self.cost_tick_size,
+            spread_ticks=self.cost_spread_ticks,
         )
 
     def bias_config(self) -> BiasConfig:
