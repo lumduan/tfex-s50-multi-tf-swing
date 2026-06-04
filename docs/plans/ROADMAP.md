@@ -703,34 +703,56 @@ verified in a fault-injection test ✓, capital-ladder rules encoded as runtime 
 
 ### 8.1 Walk-Forward Harness
 
-- [ ] `src/tfex_s50_multi_tf_swing/backtest/walk_forward.py`
-  - [ ] Anchored windows, e.g.: train 2016–2021 / test 2022; train 2017–2022 / test 2023
-  - [ ] Re-fit ML models per window
-  - [ ] Configurable cost model
-- [ ] Cost simulation:
-  - [ ] Commission: per-contract fee + clearing fee
-  - [ ] Slippage: ATR-scaled (and worse on illiquid sessions)
-  - [ ] Spread: tick-based
+- [x] `src/tfex_s50_multi_tf_swing/backtest/walk_forward.py`
+  - [x] Anchored windows (default; train start fixed + expanding) — rolling variant configurable
+  - [x] Re-fit ML models per window — injectable `ml_filter_factory` hook honouring the default-OFF gate
+  - [x] Configurable cost model
+- [x] Cost simulation (`src/tfex_s50_multi_tf_swing/backtest/costs.py`):
+  - [x] Commission: per-contract fee + clearing fee (Decimal, folded via `S50_MULTIPLIER`)
+  - [x] Slippage: ATR-scaled (and worse on illiquid sessions — night / lunch edge via `data/session.py`)
+  - [x] Spread: tick-based
 
 ### 8.2 Metrics
 
-- [ ] `src/tfex_s50_multi_tf_swing/backtest/metrics.py`
-  - [ ] Expectancy (avg R per trade)
-  - [ ] Max drawdown (peak-to-trough, time underwater)
-  - [ ] Profit factor (gross-up / gross-down)
-  - [ ] Regime-stratified metrics (per regime: expectancy, win rate)
-  - [ ] Sharpe / Sortino (per period)
+- [x] `src/tfex_s50_multi_tf_swing/backtest/metrics.py`
+  - [x] Expectancy (avg R per trade)
+  - [x] Max drawdown (peak-to-trough, time underwater + recovery — `drawdown_profile`)
+  - [x] Profit factor (gross-up / gross-down)
+  - [x] Regime-stratified metrics (per regime: expectancy, win rate) + loud `regime_concentration`
+  - [x] Sharpe / Sortino (per period)
 
 ### 8.3 Reporting
 
-- [ ] `notebooks/08_walk_forward.ipynb`
-  - [ ] Equity curve per window, concatenated
-  - [ ] Drawdown chart with regime overlay
-  - [ ] Per-strategy and combined results
-  - [ ] Sensitivity sweep on key thresholds (ATR multiplier, ML thresholds)
+- [x] `notebooks/08_walk_forward.ipynb`
+  - [x] Equity curve per window, concatenated (NAV indexed to 100, vs S50 buy-and-hold)
+  - [x] Drawdown chart with regime overlay
+  - [x] Per-strategy and combined results
+  - [x] Sensitivity sweep on key thresholds (ATR multiplier, ML thresholds)
+- [x] Owner script `scripts/run_walk_forward.py` → public-safe `results/static/backtest/walk_forward.json`
 
 **Exit criteria:** positive expectancy after costs across all walk-forward windows,
 max drawdown within budget, regime stability evidenced.
+
+> **Notes (2026-06-04):** Shipped on `feature/phase-8-walk-forward-backtest` as a cohesive
+> extension of the `backtest/` leaf package — `costs.py` (cost model), `walk_forward.py` (anchored
+> harness, the first place `risk.decision.evaluate_entry` is driven per trade), `data_source.py`
+> (engine / Parquet-snapshot loader, never tvkit), extended `metrics.py` + `models.py` +
+> `errors.py`, `WalkForwardConfig` / `CostModel` on `Settings`, `scripts/run_walk_forward.py` +
+> `notebooks/08_walk_forward.ipynb`. 100 % coverage on the new modules, mypy strict, full gate green.
+> - **Anchored windows only** (TFEX hard rule #6) — `generate_windows` is deterministic and asserts
+>   `train_end ≤ test_start`; a non-random / no-look-ahead test is part of the suite.
+> - **Combined run shares one daily `SessionRiskState`** across A/B/C (portfolio-wide limits); the
+>   per-strategy runs are isolated. Execution uses the **raw per-contract** series, signals the
+>   back-adjusted continuous (hard rule #3). Money is `Decimal` via the single `S50_MULTIPLIER`.
+> - **The exit-criteria *magnitudes* are deferred → data-gated** on the (non-existent) 5-year TFEX
+>   backfill + engine TFEX data — Phase 8 ships the *machinery* + a synthetic / public-safe
+>   demonstration, never a faked backtest. `[~]`-grade: machinery complete, numbers pending data.
+> - **Backtest deployment stage:** the capital ladder caps `paper` to 0 contracts, so a backtest
+>   runs at `micro_live`+ (the owner script evaluates scaled capacity with full evidence; live
+>   deployment stays ladder-gated). **rv-percentile size-halving** is not threaded onto the
+>   execution `Trade` — backtest sizing uses the regime cap (a documented, non-faked enhancement).
+> - **Stayed ROADMAP-pure:** no FastAPI endpoint, no gateway `extended_data` change, no `live/`
+>   wiring. Plan: [`phase-8-walk-forward-backtest.md`](phase-8-walk-forward-backtest.md).
 
 ---
 
@@ -872,7 +894,18 @@ the calendar consumed by paper trading rather than coding.
 
 > Update this section as phases complete.
 
-- **Active phase:** Phase 8 — Walk-Forward Backtest (next). **Phase 7 — Risk Engine shipped
+- **Active phase:** Phase 9 — Paper Trading (next). **Phase 8 — Walk-Forward Backtest machinery
+  shipped 2026-06-04** on `feature/phase-8-walk-forward-backtest` (the `backtest/` extension:
+  `costs.py` cost model, `walk_forward.py` anchored harness driving `risk.decision.evaluate_entry`
+  per trade with one shared daily session across A/B/C, `data_source.py` engine/Parquet-snapshot
+  loader, extended `metrics.py` (Sharpe/Sortino, drawdown profile, regime concentration) +
+  `models.py` + `errors.py`, `WalkForwardConfig`/`CostModel` on `Settings`,
+  `scripts/run_walk_forward.py` + `notebooks/08_walk_forward.ipynb`). 100 % coverage on the new
+  modules, mypy strict, suite 98 %. Stayed ROADMAP-pure (no `extended_data`/gateway change, no
+  FastAPI endpoint, no `live/` wiring). **Deferred → data-gated:** the exit-criteria *magnitudes*
+  (positive expectancy after costs, drawdown within budget, regime stability) need the 5-year TFEX
+  backfill + engine TFEX data — the harness + a synthetic demonstration ship now.
+- **Phase 7 — Risk Engine shipped
   2026-06-04** on `feature/phase-7-risk-engine` (the `risk/` leaf package: position sizing on the
   `S50_MULTIPLIER = 200` constant, daily-loss / streak / trade-count limits as an immutable session
   reducer, no-averaging-down + no-widen-stop guards, regime/volatility scaling reusing `regime/`,
@@ -893,7 +926,8 @@ the calendar consumed by paper trading rather than coding.
 - **Completed sub-phases:** 0.1–0.5 (2026-05-28); Phase 1 (2026-05-28); Phase 2.1–2.6
   (2026-05-29); Phase 3 §3.1 + §3.4 (2026-05-29); Phase 4 §4.1 + §4.2 (2026-06-03); Phase 5
   §5.1–§5.4 + §5.5 harness (2026-06-03); Phase 6 §6.1–§6.4 machinery, default-OFF (2026-06-04;
-  magnitude data-gated); Phase 7 §7.1–§7.5 (2026-06-04; admin endpoint + ladder evidence deferred).
+  magnitude data-gated); Phase 7 §7.1–§7.5 (2026-06-04; admin endpoint + ladder evidence deferred);
+  Phase 8 §8.1–§8.3 machinery (2026-06-04; exit-criteria magnitudes data-gated).
 - **Phase 0 plan:** [`phase-0-bootstrap-and-gateway-onboarding.md`](phase-0-bootstrap-and-gateway-onboarding.md).
 - **Phase 1 plan:** [`phase-1-data-infrastructure.md`](phase-1-data-infrastructure.md). All five sub-phases shipped on 2026-05-28: tvkit fetcher, back-adjusted continuous via 5d volume-crossover roll, Thai session calendar, validation pipeline + `S501!` cross-check, data-quality notebook. 159 tests, ≥ 94 % coverage on `adapters/` + `data/`, mypy strict clean. TimescaleDB hypertable mirror added via `quant-infra-db` PR #9 (`ohlcv_raw`, `ohlcv_continuous`).
 - **Phase 2 plan:** [`phase-2-feature-engineering.md`](phase-2-feature-engineering.md). Shipped 2026-05-29: trend / volatility / time-of-day / market-structure / regime feature groups + the §2.6 pipeline (winsorise + trailing z-score) and a causal multi-timeframe aligner. Polars-native, look-ahead-free. 214 tests, 100 % coverage on every `features/` module (95.6 % combined), mypy strict clean. Owner CLI `scripts/build_features.py`; stability notebook scaffolded (data-gated).
@@ -922,15 +956,23 @@ the calendar consumed by paper trading rather than coding.
   (`TFEX_S50_MULTI_TF_SWING_RISK_*` + `risk_config()`). The kill-switch admin endpoint is deferred
   to `api/`; the ladder's live-evidence actuals are data-gated (Phase 9/10). Stayed ROADMAP-pure
   (no `extended_data`/gateway change, no FastAPI endpoint, no `live/` wiring, no walk-forward).
+- **Phase 8 plan:** [`phase-8-walk-forward-backtest.md`](phase-8-walk-forward-backtest.md).
+  §8.1–§8.3 machinery shipped 2026-06-04 as the `backtest/` extension (anchored walk-forward
+  harness driving the Phase-7 risk engine per trade, a configurable cost model, drawdown-profile /
+  Sharpe-Sortino / regime-concentration metrics, and public-safe reporting). 100 % coverage on the
+  new modules, mypy strict; `WalkForwardConfig` / `CostModel` surfaced on `Settings`
+  (`TFEX_S50_MULTI_TF_SWING_WALK_FORWARD_*` / `_COST_*`). The exit-criteria magnitudes are
+  data-gated on the 5-year TFEX backfill + engine TFEX data. Stayed ROADMAP-pure.
 - **Market-data engine integration:** `feature-market-data-engine` **Phase 4 (reader
   cutover) shipped 2026-06-02** (tfex PR #6, `8756b1a`) — the
   `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE = mirror | engine` flag + `EngineOhlcvFetcher` +
   engine client + boundary tests. **Default is still `mirror`**; tfex end-to-end verification
   and the default flip to `engine` are **pending Phase 5.x** (no TFEX data in the engine yet).
   See [Market data source](#market-data-source--the-market-data-engine).
-- **Blocked by:** nothing for the strategy roadmap. Next: Phase 8 (Walk-Forward Backtest) drives
-  the Phase-7 risk engine over Phase-5 signals/execution with a cost model and anchored
-  walk-forward windows.
+- **Blocked by:** nothing for the strategy roadmap. Next: Phase 9 (Paper Trading) runs the
+  validated pipeline real-time (would-be orders only) over 60+ trading days across regimes. The
+  Phase-8 exit-criteria *magnitudes* remain data-gated on the 5-year TFEX backfill + engine TFEX
+  data; the walk-forward harness is ready to produce them the moment that data lands.
 
 ---
 
