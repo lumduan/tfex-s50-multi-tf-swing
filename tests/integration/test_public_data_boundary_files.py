@@ -106,3 +106,72 @@ def test_detector_passes_clean_payload() -> None:
     payload = {"summary": {"sharpe": 1.2, "max_drawdown": "0.05", "trades": 3}}
     assert _forbidden_keys_in(payload) == []
     assert _long_numeric_arrays_in(payload) == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — the walk-forward report serialiser is public-safe by construction.
+# ---------------------------------------------------------------------------
+
+
+def test_walk_forward_report_is_public_safe() -> None:
+    """The Phase-8 ``results/static/backtest`` artifact carries no OHLCV / raw price arrays."""
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+
+    import polars as pl
+    from scripts.run_walk_forward import _report_to_dict
+
+    from tfex_s50_multi_tf_swing.backtest.costs import CostModel
+    from tfex_s50_multi_tf_swing.backtest.models import WalkForwardConfig
+    from tfex_s50_multi_tf_swing.backtest.walk_forward import run_walk_forward
+    from tfex_s50_multi_tf_swing.execution.models import ExecutionConfig
+    from tfex_s50_multi_tf_swing.risk.models import RiskConfig
+    from tfex_s50_multi_tf_swing.signals.models import SetupSignal
+
+    start = datetime(2026, 1, 5, 3, 0, tzinfo=UTC)
+    bars = pl.DataFrame(
+        {
+            "time": [start + timedelta(hours=i) for i in range(720)],
+            "open": [100.0 + 0.5 * i for i in range(720)],
+            "high": [101.0 + 0.5 * i for i in range(720)],
+            "low": [99.0 + 0.5 * i for i in range(720)],
+            "close": [100.0 + 0.5 * i for i in range(720)],
+            "atr": [2.0] * 720,
+        },
+        schema={
+            "time": pl.Datetime("us", "UTC"),
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "atr": pl.Float64,
+        },
+    )
+
+    def detect(df: pl.DataFrame) -> list[SetupSignal]:
+        if df.height < 5:
+            return []
+        row = df.row(0, named=True)
+        return [
+            SetupSignal(
+                strategy_id="A",
+                time=row["time"],
+                direction="long",
+                trigger_price=Decimal(str(row["close"])),
+                stop_reference=Decimal(str(row["close"] - 2.0)),
+                regime="trend_up",
+            )
+        ]
+
+    report = run_walk_forward(
+        inputs=bars,
+        raw_bars=bars,
+        detect={"A": detect},
+        wf_config=WalkForwardConfig(train_span_days=10, test_span_days=5, step_days=5),
+        exec_config=ExecutionConfig(),
+        risk_config=RiskConfig(deployment_stage="micro_live"),
+        cost_model=CostModel(),
+    )
+    payload = _report_to_dict(report)
+    assert _forbidden_keys_in(payload) == []
+    assert _long_numeric_arrays_in(payload) == []

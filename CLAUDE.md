@@ -380,6 +380,48 @@ and the umbrella reader-cutover knowledge
   defaults. Design notes: `.claude/knowledge/risk-engine.md`; operations:
   `.claude/playbooks/risk-kill-switch-and-ladder.md`.
 
+### Phase 8 — walk-forward / cost-model layer
+
+- `src/tfex_s50_multi_tf_swing/backtest/` is extended (not duplicated) into the validation harness:
+  `costs.py` (the cost model), `walk_forward.py` (the anchored harness), `data_source.py` (the
+  source-agnostic loader), plus extended `metrics.py` / `models.py` / `errors.py`. It is a leaf:
+  one-way dependency `signals/ + execution/ + risk/ + regime/ + ml/ + data/ → backtest/`; it imports
+  nothing from `api/`. **This is the first place `risk.decision.evaluate_entry` is actually driven.**
+- **Anchored walk-forward only** (hard rule #6). `walk_forward.generate_windows` is deterministic
+  (no RNG, no wall-clock — bounds derived from the injected data span in tz-aware `Asia/Bangkok`),
+  defaults to `mode="anchored"` (train start fixed + expanding; `rolling` is configurable), and
+  always yields `train_end ≤ test_start`. A no-look-ahead / non-random test guards this.
+- **Risk-driven per trade.** `drive_costed_trades` walks costed trades in `entry_time` order,
+  starts a fresh `SessionRiskState` per BKK trading date, sizes each via `evaluate_entry`, and skips
+  the trade when the engine disallows it (kill switch / session halt / no-trade regime / sub-1
+  contract). The **combined** A+B+C run shares **one** daily session (portfolio-wide limits — a
+  single live account); the **per-strategy** runs are isolated. THB equity (`Decimal`) compounds
+  across windows via the single `risk.sizing.S50_MULTIPLIER`. **The capital ladder caps the `paper`
+  stage to 0 contracts**, so a backtest runs at `micro_live`+ (the owner script evaluates scaled
+  capacity with full evidence; live deployment stays ladder-gated).
+- **Cost model** (`costs.py`): commission + clearing fee (`Decimal`, folded to points via
+  `S50_MULTIPLIER`), ATR-scaled slippage (worse on the night / lunch-edge illiquid sessions, via
+  `data/session.py`), and tick-based spread. `CostedTrade.net_trade` re-exposes the gross `Trade`
+  with net PnL so **every existing R-multiple metric runs unchanged** over the post-cost outcome.
+  Execution uses the **raw per-contract** series; signals the back-adjusted continuous (hard rule #3).
+- **Metrics** extend (never fork) `metrics.py`: `drawdown_profile` (depth + time-underwater +
+  recovery), `sharpe` / `sortino` / `period_ratios` (per-period net-R), and `regime_concentration`
+  which **fails loudly** when one regime carries the edge. Typed Pydantic result models in `models.py`.
+- **Data source** (`data_source.py`): reads the engine's offline **Parquet snapshot**
+  (`ParquetStore`) — **never tvkit** — and raises the typed `WalkForwardDataError` when a frame is
+  missing / empty. `4h` stays engine-declined (A/B degrade to `neutral`, C still runs).
+- **Per-window ML re-fit** is the injectable `ml_filter_factory` hook (default `None` ⇒ Phase-5
+  behaviour byte-for-byte, respecting the default-OFF ML gate); the concrete training wiring lives
+  in `scripts/run_walk_forward.py` so the harness stays a lean leaf.
+- **Config:** `WalkForwardConfig` / `CostModel` (frozen, bounded) surfaced on `Settings` via
+  `TFEX_S50_MULTI_TF_SWING_WALK_FORWARD_*` / `_COST_*` and `walk_forward_config()` / `cost_model()`;
+  an unset env reproduces the documented defaults.
+- **Reporting:** `scripts/run_walk_forward.py` + `notebooks/08_walk_forward.ipynb` write public-safe
+  artifacts (counts / R-metrics / ratios / NAV index only, **never** raw OHLCV) to
+  `results/static/backtest/`. **The exit-criteria magnitudes are deferred → data-gated** on the
+  5-year TFEX backfill + engine TFEX data — the harness + a synthetic demonstration ship now.
+- **Stayed ROADMAP-pure:** no FastAPI endpoint, no gateway `extended_data` change, no `live/` wiring.
+
 ### Public data boundary
 
 Raw OHLCV columns (`open`, `high`, `low`, `close`, `volume`) and proprietary feature
@@ -462,6 +504,8 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `f
 - **Phase 6 plan (ML probability filter):** [`docs/plans/phase-6-ml-probability-filter.md`](docs/plans/phase-6-ml-probability-filter.md)
 - **Risk engine specification:** `.claude/knowledge/risk-engine.md`
 - **Phase 7 plan (risk engine):** [`docs/plans/phase-7-risk-engine.md`](docs/plans/phase-7-risk-engine.md)
+- **Phase 8 plan (walk-forward backtest):** [`docs/plans/phase-8-walk-forward-backtest.md`](docs/plans/phase-8-walk-forward-backtest.md)
+- **Running the walk-forward backtest:** `.claude/playbooks/walk-forward-backtest.md`
 - **Kill-switch / capital-ladder operations:** `.claude/playbooks/risk-kill-switch-and-ladder.md`
 - **ML filter design + lifecycle:** `.claude/knowledge/ml-filter.md`, `.claude/playbooks/ml-filter-lifecycle.md`
 - **Backtest protocol:** `.claude/knowledge/backtest-protocol.md`
