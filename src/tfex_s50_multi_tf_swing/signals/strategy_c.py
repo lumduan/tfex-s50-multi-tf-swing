@@ -1,6 +1,12 @@
 """Strategy C — Liquidity-Sweep Reversal (ROADMAP §5.3).
 
-On the aligned 5m frame:
+**Permanently disabled per the 1H-execution migration (2026-06-05).** This strategy was
+identified as the primary drawdown driver in the 14-month walk-forward (294 trades at
++0.01R, 49.0% win rate, 31.13R max drawdown contribution) and has been removed from the
+active registry in ``gate.py``. The module remains importable for reference but no code
+path reaches it.
+
+On the aligned 5m frame (legacy):
 
 1. The **1H regime** whitelists C (``range_high_vol`` per the Phase-3 policy).
 2. A liquidity sweep + reversal has just confirmed (``liquidity_sweep_flag == 1`` — the Phase-2

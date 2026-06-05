@@ -180,7 +180,7 @@ def _run(args: argparse.Namespace) -> int:
         bias_config=settings.bias_config(),
         signal_config=sig_cfg,
     )
-    raw_bars = build_execution_bars(frames["5m"])
+    raw_bars = build_execution_bars(frames["1h"])
 
     detect = build_detect_map(
         sig_cfg,
@@ -216,7 +216,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--with-4h",
         action="store_true",
-        help="Include the 4H frame (mirror source only; the engine source declines 4h).",
+        help="Include the 4H frame (legacy; regime/bias now run on 1D bars — 4H is deprecated).",
     )
     parser.add_argument("--out-dir", type=Path, default=_DEFAULT_OUT)
     parser.add_argument(

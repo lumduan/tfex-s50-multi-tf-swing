@@ -40,14 +40,15 @@ class CostModel(BaseModel):
     """Frozen, bounded cost knobs for one S50 round-trip per contract.
 
     ``commission_per_contract`` / ``clearing_fee_per_contract`` are THB **round-trip** fees (entry
-    + exit) per contract. ``slippage_atr_mult`` scales slippage to volatility; on an illiquid
-    session (night / lunch dead-zone edge) it is multiplied by ``illiquid_session_mult``.
+    + exit) per contract. Default commission is **160 THB round-trip** (80 THB/side incl. VAT/fees,
+    1H-execution migration retail rate). ``slippage_atr_mult`` scales slippage to volatility; on an
+    illiquid session (night / lunch dead-zone edge) it is multiplied by ``illiquid_session_mult``.
     ``spread_ticks`` × ``tick_size`` is the half-spread paid in index points.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    commission_per_contract: Decimal = Field(default=Decimal("85"), ge=0)
+    commission_per_contract: Decimal = Field(default=Decimal("160"), ge=0)
     clearing_fee_per_contract: Decimal = Field(default=Decimal("1"), ge=0)
     slippage_atr_mult: float = Field(default=0.05, ge=0.0)
     illiquid_session_mult: float = Field(default=2.0, ge=1.0)

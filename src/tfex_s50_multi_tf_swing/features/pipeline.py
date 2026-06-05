@@ -85,7 +85,7 @@ def build_panel(
 def build_aligned(
     panels: Mapping[Timeframe, pl.DataFrame],
     *,
-    base_timeframe: Timeframe = "5m",
+    base_timeframe: Timeframe = "1h",
 ) -> pl.DataFrame:
     """Causally widen the base-TF panel with every coarser TF's features."""
     if base_timeframe not in panels:

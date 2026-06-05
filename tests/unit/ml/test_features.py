@@ -95,7 +95,7 @@ def test_build_row_index_keys_by_time() -> None:
     frame = aligned_frame(6)
     index = build_row_index(frame)
     assert T0 in index
-    assert index[T0]["1h_regime"] == "range_high_vol"
+    assert index[T0]["1d_regime"] == "trend_up"
 
 
 def test_build_row_index_requires_time_column() -> None:
@@ -106,7 +106,7 @@ def test_build_row_index_requires_time_column() -> None:
 
 def test_build_feature_frame_matches_times() -> None:
     frame = aligned_frame(6)
-    times = [T0, T0 + timedelta(minutes=5)]
+    times = [T0, T0 + timedelta(hours=1)]
     matrix = build_feature_frame(frame, times)
     assert matrix.shape == (2, len(FEATURE_COLUMNS))
 

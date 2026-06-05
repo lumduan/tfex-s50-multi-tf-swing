@@ -34,11 +34,11 @@ def _continuous(n: int) -> pl.DataFrame:
 
 def test_load_continuous_frames_success(tmp_path: Path) -> None:
     store = ParquetStore(tmp_path)
-    store.write_continuous("5m", _continuous(20))
-    store.write_continuous("1h", _continuous(10))
+    store.write_continuous("1h", _continuous(20))
+    store.write_continuous("1d", _continuous(10))
     frames = load_continuous_frames(store)
-    assert set(frames) == {"5m", "1h"}
-    assert frames["5m"].height == 20
+    assert set(frames) == {"1h", "1d"}
+    assert frames["1h"].height == 20
 
 
 def test_load_continuous_frames_missing_raises(tmp_path: Path) -> None:

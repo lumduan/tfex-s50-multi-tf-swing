@@ -64,7 +64,7 @@ def test_row_matches_frame(base_and_override: tuple[dict[str, object], dict[str,
 
 def test_required_columns_track_or_window() -> None:
     assert "or_high_30" in strategy_b.required_columns(SignalConfig(or_window=30))
-    assert "or_high_15" in strategy_b.required_columns(SignalConfig())
+    assert "or_high_60" in strategy_b.required_columns(SignalConfig())
 
 
 def test_missing_or_window_columns_raise() -> None:

@@ -109,9 +109,9 @@ class Settings(BaseSettings):
     signal_squeeze_max: float = Field(default=1.0, gt=0.0)
     signal_atr_compression_max: float = Field(default=1.0, gt=0.0)
     signal_volume_expansion_min: float = Field(default=1.0)
-    signal_or_window: int = Field(default=15, ge=1)
+    signal_or_window: int = Field(default=60, ge=1)
     signal_require_structure_shift: bool = True
-    signal_swing_window: int = Field(default=12, ge=2)
+    signal_swing_window: int = Field(default=4, ge=2)
 
     # Risk mitigation — active strategy pool + entry regime gate (config-driven, reversible).
     # ``enabled_strategies`` is the comma-separated set of strategy ids the detect map activates
@@ -129,7 +129,7 @@ class Settings(BaseSettings):
     execution_partial_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
     execution_breakeven_buffer: float = Field(default=0.0, ge=0.0)
     execution_trail_atr_mult: float = Field(default=1.5, gt=0.0)
-    execution_time_stop_bars: int = Field(default=24, ge=1)
+    execution_time_stop_bars: int = Field(default=8, ge=1)
     execution_max_spread_mult: float = Field(default=3.0, gt=0.0)
 
     # Phase 6 — ML probability filter. Default OFF: an unset env reproduces Phase-5
@@ -175,7 +175,7 @@ class Settings(BaseSettings):
     walk_forward_refit_ml: bool = False
 
     # Phase 8 — cost model. Bounds mirror ``backtest.costs.CostModel``; THB fees are Decimal.
-    cost_commission_per_contract: Decimal = Field(default=Decimal("85"), ge=0)
+    cost_commission_per_contract: Decimal = Field(default=Decimal("160"), ge=0)
     cost_clearing_fee_per_contract: Decimal = Field(default=Decimal("1"), ge=0)
     cost_slippage_atr_mult: float = Field(default=0.05, ge=0.0)
     cost_illiquid_session_mult: float = Field(default=2.0, ge=1.0)

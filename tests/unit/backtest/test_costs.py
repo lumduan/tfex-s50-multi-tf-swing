@@ -23,7 +23,7 @@ def test_apply_costs_reduces_net_below_gross() -> None:
     assert out.net_pnl_points < trade.pnl_points
     assert out.net_r_multiple < trade.r_multiple
     # commission folds via the multiplier; never re-typed inline.
-    expected_commission = (Decimal("85") + Decimal("1")) / S50_MULTIPLIER
+    expected_commission = (Decimal("160") + Decimal("1")) / S50_MULTIPLIER
     assert out.commission_points == expected_commission
 
 

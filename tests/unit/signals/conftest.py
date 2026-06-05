@@ -1,13 +1,20 @@
 """Shared fixtures and builders for the signal-layer tests.
 
-The strategies read a wide *aligned 5m* frame (``4h_bias_direction`` + ``1h_*`` + 5m columns).
-Building it through the full pipeline is slow and ``structure`` is often null on sparse synthetic
-pivots, so — exactly like the regime / bias suites — tests hand-build one row per gate branch.
+The strategies read a wide *aligned 1H* frame (``1d_bias_direction`` + ``1d_regime`` + 1H
+base columns). Building it through the full pipeline is slow and ``structure`` is often null on
+sparse synthetic pivots, so — exactly like the regime / bias suites — tests hand-build one row
+per gate branch.
 
 A single source of truth keeps the frame and scalar paths in lock-step: a baseline is expressed
 as **``SetupFeatures`` keyword args**; :func:`feats` builds the scalar model and :func:`to_row`
 maps the same kwargs to the aligned frame's column names, so ``classify_row`` and
 ``classify_frame`` are guaranteed to see identical inputs (the parity tests rely on this).
+
+.. note::
+   Updated for the 1H-execution migration (2026-06-05): ``1d_bias_direction`` replaces
+   ``4h_bias_direction``, ``1d_regime`` replaces ``1h_regime``, and the 1H base features
+   are unprefixed. The ``h1_*`` attribute names in baselines map to the base columns
+   (e.g. ``h1_dist_from_vwap`` → ``dist_from_vwap``) for backward-compatible test code.
 """
 
 from __future__ import annotations
@@ -23,12 +30,8 @@ _T0 = datetime(2026, 1, 5, 3, 0, tzinfo=UTC)
 # Aligned-frame column dtypes (forces dtypes even when a cell is ``None``).
 SCHEMA: dict[str, pl.DataType] = {
     "time": pl.Datetime(time_unit="us", time_zone="UTC"),
-    "4h_bias_direction": pl.Utf8(),
-    "1h_regime": pl.Utf8(),
-    "1h_dist_from_vwap": pl.Float64(),
-    "1h_structure": pl.Utf8(),
-    "1h_atr_ratio": pl.Float64(),
-    "1h_volume_expansion": pl.Float64(),
+    "1d_bias_direction": pl.Utf8(),
+    "1d_regime": pl.Utf8(),
     "atr_ratio": pl.Float64(),
     "bollinger_squeeze": pl.Float64(),
     "volume_expansion": pl.Float64(),
@@ -37,21 +40,22 @@ SCHEMA: dict[str, pl.DataType] = {
     "close": pl.Float64(),
     "swing_high": pl.Float64(),
     "swing_low": pl.Float64(),
-    "or_high_15": pl.Float64(),
-    "or_low_15": pl.Float64(),
+    "or_high_60": pl.Float64(),
+    "or_low_60": pl.Float64(),
     "liquidity_sweep_flag": pl.Int8(),
     "lunch_zone_flag": pl.Int8(),
 }
 
 # Map a ``SetupFeatures`` attribute name to its aligned-frame column name.
+# ``h1_*`` attributes are deprecated but map to the base 1H columns for backward compat.
 _ATTR_TO_COL: dict[str, str] = {
     "time": "time",
-    "bias_direction": "4h_bias_direction",
-    "regime": "1h_regime",
-    "h1_dist_from_vwap": "1h_dist_from_vwap",
-    "h1_structure": "1h_structure",
-    "h1_atr_ratio": "1h_atr_ratio",
-    "h1_volume_expansion": "1h_volume_expansion",
+    "bias_direction": "1d_bias_direction",
+    "regime": "1d_regime",
+    "h1_dist_from_vwap": "dist_from_vwap",
+    "h1_structure": "structure",
+    "h1_atr_ratio": "atr_ratio",
+    "h1_volume_expansion": "volume_expansion",
     "atr_ratio": "atr_ratio",
     "bollinger_squeeze": "bollinger_squeeze",
     "volume_expansion": "volume_expansion",
@@ -60,13 +64,14 @@ _ATTR_TO_COL: dict[str, str] = {
     "close": "close",
     "swing_high": "swing_high",
     "swing_low": "swing_low",
-    "or_high": "or_high_15",
-    "or_low": "or_low_15",
+    "or_high": "or_high_60",
+    "or_low": "or_low_60",
     "liquidity_sweep_flag": "liquidity_sweep_flag",
     "lunch_zone_flag": "lunch_zone_flag",
 }
 
-# A clean long for A and B: directional bias, trending regime, pullback complete, 5m breakout.
+# A clean long for Strategy B (ORB): directional bias, trending regime, breakout above OR.
+# 1H is now the base timeframe — all features are on the 1H frame.
 LONG_BASE: dict[str, object] = {
     "time": _T0,
     "bias_direction": "long",
@@ -89,7 +94,7 @@ LONG_BASE: dict[str, object] = {
     "lunch_zone_flag": 0,
 }
 
-# The exact mirror — a clean short for A and B.
+# The exact mirror — a clean short for Strategy B.
 SHORT_BASE: dict[str, object] = {
     "time": _T0,
     "bias_direction": "short",
@@ -112,7 +117,8 @@ SHORT_BASE: dict[str, object] = {
     "lunch_zone_flag": 0,
 }
 
-# A clean Strategy-C long: range_high_vol regime, a confirmed sweep, reclaim above VWAP.
+# A clean Strategy-C long (range_high_vol regime, confirmed sweep, reclaim above VWAP).
+# Strategy C is permanently disabled — these baselines are kept for reference.
 SWEEP_BASE: dict[str, object] = {
     "time": _T0,
     "bias_direction": "neutral",
@@ -155,5 +161,5 @@ def to_row(base: dict[str, object], **overrides: object) -> dict[str, object]:
 
 
 def frame(rows: list[dict[str, object]]) -> pl.DataFrame:
-    """Build an aligned 5m frame with the canonical :data:`SCHEMA` dtypes."""
+    """Build an aligned 1H frame with the canonical :data:`SCHEMA` dtypes."""
     return pl.DataFrame(rows, schema=SCHEMA)

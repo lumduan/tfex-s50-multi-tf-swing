@@ -13,13 +13,19 @@ ingestion contract `POST /api/v1/ingest/daily-report`.
 
 The system trades a single instrument (S50) using a strict multi-timeframe hierarchy:
 
-- **4H** — regime detection and higher-timeframe bias.
-- **1H** — main setup detection (pullback continuation, opening range, sweep reversal).
-- **5m** — execution timing and risk optimisation.
+- **1D** — regime detection and higher-timeframe bias (Daily bars; migrated from 4H, 2026-06-05).
+- **1H** — main setup detection + execution (migrated from 5m, 2026-06-05).
+- **5m / 4H** — retained in the type system for backward-compatible Parquet store reads;
+  no active signal path references them.
 
 Design philosophy: the system is **boring, conservative, and engineered to survive
 across regimes** — not optimised for a beautiful backtest. Edge comes from regime
 awareness + cost efficiency + risk management + execution quality.
+
+**Active phase: 1H-execution migration (2026-06-05).** Execution TF is 1H;
+HTF regime/bias runs on Daily bars. Strategy B (ORB, 1H) is the sole active core
+strategy. Strategy C (Sweep) is permanently disabled. Strategy A (Pullback) is
+disabled by default. Commission model: 160 THB round-trip (80 THB/side).
 
 The repo follows the umbrella's two-mode pattern (controlled by
 `TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE`):
@@ -85,9 +91,8 @@ Tests mirror the source layout (`tests/unit/<subpkg>/` ↔ `src/tfex_s50_multi_t
 ```
 ┌─────────────────────────────────────────────┐
 │  Raw Market Data (multi-TF OHLCV)            │
-│  4H → Regime / Macro Bias                    │
-│  1H → Main Setup Detection                   │
-│  5m → Execution & Risk Optimisation          │
+│  1D → Regime / Macro Bias                    │
+│  1H → Main Setup Detection + Execution       │
 └─────────────────────┬───────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────┐
@@ -106,8 +111,8 @@ Tests mirror the source layout (`tests/unit/<subpkg>/` ↔ `src/tfex_s50_multi_t
                       │
 ┌─────────────────────▼───────────────────────┐
 │  Execution Layer                             │
-│  - Setup Detection (Strategies A / B / C)    │
-│  - Execution Engine (5m)                     │
+│  - Setup Detection (Strategy B active; A/C disabled) │
+│  - Execution Engine (1H)                     │
 │  - Risk Engine                               │
 └─────────────────────┬───────────────────────┘
                       │

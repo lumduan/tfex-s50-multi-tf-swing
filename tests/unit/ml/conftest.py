@@ -1,16 +1,19 @@
 """Shared fixtures and builders for the ML probability-filter tests.
 
-The filter and training pipeline read a wide *aligned 5m* frame plus a 5m *bars* frame.
+The filter and training pipeline read a wide *aligned 1H* frame plus a 1H *bars* frame.
 Building them through the full data → features pipeline is slow and brittle, so — exactly
 like the signal / bias suites — these helpers hand-build deterministic synthetic frames:
 
-* :func:`aligned_frame` — an aligned frame whose sweep bars fire **Strategy C** in alternating
+* :func:`aligned_frame` — an aligned frame whose ORB bars fire **Strategy B** in alternating
   directions (enough fired setups to walk forward).
-* :func:`bars_frame` — the matching 5m execution bars (a triangle price path so triple-barrier
+* :func:`bars_frame` — the matching 1H execution bars (a triangle price path so triple-barrier
   labels come out *mixed*, not all one class).
 * :class:`ConstantModel` — a stub :class:`ProbabilityModel` returning a fixed probability, so
   gate logic can be tested without a real booster.
 * :func:`make_card` / :func:`stub_bundle` — assemble a :class:`ModelBundle` from stubs.
+
+Updated for the 1H-execution migration (2026-06-05): uses 1H bars + 1d_bias_direction +
+1d_regime. Strategy B (ORB) replaces the permanently-disabled Strategy C.
 """
 
 from __future__ import annotations
@@ -25,19 +28,15 @@ import polars as pl
 
 from tfex_s50_multi_tf_swing.ml.features import FEATURE_COLUMNS
 from tfex_s50_multi_tf_swing.ml.models import ModelBundle, ModelCard, ModelTarget
-from tfex_s50_multi_tf_swing.signals import strategy_c
+from tfex_s50_multi_tf_swing.signals import strategy_b
 from tfex_s50_multi_tf_swing.signals.models import SetupSignal
 
 T0 = datetime(2026, 1, 5, 3, 0, tzinfo=UTC)
 
 ALIGNED_SCHEMA: dict[str, pl.DataType] = {
     "time": pl.Datetime(time_unit="us", time_zone="UTC"),
-    "4h_bias_direction": pl.Utf8(),
-    "1h_regime": pl.Utf8(),
-    "1h_dist_from_vwap": pl.Float64(),
-    "1h_structure": pl.Utf8(),
-    "1h_atr_ratio": pl.Float64(),
-    "1h_volume_expansion": pl.Float64(),
+    "1d_bias_direction": pl.Utf8(),
+    "1d_regime": pl.Utf8(),
     "atr_ratio": pl.Float64(),
     "bollinger_squeeze": pl.Float64(),
     "volume_expansion": pl.Float64(),
@@ -46,6 +45,8 @@ ALIGNED_SCHEMA: dict[str, pl.DataType] = {
     "close": pl.Float64(),
     "swing_high": pl.Float64(),
     "swing_low": pl.Float64(),
+    "or_high_60": pl.Float64(),
+    "or_low_60": pl.Float64(),
     "liquidity_sweep_flag": pl.Int8(),
     "lunch_zone_flag": pl.Int8(),
 }
@@ -68,31 +69,34 @@ def _mid(i: int, n: int) -> float:
 
 
 def aligned_frame(n: int = 40) -> pl.DataFrame:
-    """An aligned 5m frame whose every-third bar fires Strategy C, alternating long/short."""
+    """An aligned 1H frame whose every-third bar fires Strategy B (ORB), alternating long/short."""
     rows: list[dict[str, object]] = []
     for i in range(n):
-        t = T0 + timedelta(minutes=5 * i)
+        t = T0 + timedelta(hours=i)
         mid = _mid(i, n)
         is_long = i % 2 == 0
-        dist = 1.0 if is_long else -1.0
+        # Every third bar fires: close breaks out above or_high (long) or below or_low (short).
+        fire = i % 3 == 0
+        if fire:
+            close_val = mid + 2.0 if is_long else mid - 2.0
+        else:
+            close_val = mid + (0.6 if is_long else -0.6)
         rows.append(
             {
                 "time": t,
-                "4h_bias_direction": "neutral",
-                "1h_regime": "range_high_vol",
-                "1h_dist_from_vwap": dist,
-                "1h_structure": None,
-                "1h_atr_ratio": 1.0,
-                "1h_volume_expansion": 0.0,
-                "atr_ratio": 1.0,
-                "bollinger_squeeze": 1.0,
-                "volume_expansion": 0.6,
-                "dist_from_vwap": dist,
+                "1d_bias_direction": "long" if is_long else "short",
+                "1d_regime": "trend_up",
+                "atr_ratio": 0.9,
+                "bollinger_squeeze": 0.7,
+                "volume_expansion": 1.5,
+                "dist_from_vwap": 0.5,
                 "structure": "HH" if is_long else "LL",
-                "close": mid + (0.6 if is_long else -0.6),
+                "close": close_val,
                 "swing_high": mid + 6.0,
                 "swing_low": mid - 6.0,
-                "liquidity_sweep_flag": 1 if i % 3 == 0 else 0,
+                "or_high_60": mid + 1.0,
+                "or_low_60": mid - 1.0,
+                "liquidity_sweep_flag": 0,
                 "lunch_zone_flag": 0,
             }
         )
@@ -100,10 +104,10 @@ def aligned_frame(n: int = 40) -> pl.DataFrame:
 
 
 def bars_frame(n: int = 40) -> pl.DataFrame:
-    """5m execution bars matching :func:`aligned_frame` (intrabar range under the barrier)."""
+    """1H execution bars matching :func:`aligned_frame` (intrabar range under the barrier)."""
     rows: list[dict[str, object]] = []
     for i in range(n):
-        t = T0 + timedelta(minutes=5 * i)
+        t = T0 + timedelta(hours=i)
         mid = _mid(i, n)
         is_long = i % 2 == 0
         rows.append(
@@ -119,17 +123,17 @@ def bars_frame(n: int = 40) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=_BARS_SCHEMA)
 
 
-def c_signals(frame: pl.DataFrame) -> list[SetupSignal]:
-    """Fire Strategy C on an aligned frame."""
-    return strategy_c.to_signals(strategy_c.classify_frame(frame))
+def b_signals(frame: pl.DataFrame) -> list[SetupSignal]:
+    """Fire Strategy B on an aligned frame."""
+    return strategy_b.to_signals(strategy_b.classify_frame(frame))
 
 
 def make_signal(
     *,
-    strategy_id: str = "C",
+    strategy_id: str = "B",
     minute: int = 0,
     direction: str = "long",
-    regime: str | None = "range_high_vol",
+    regime: str | None = "trend_up",
 ) -> SetupSignal:
     """A minimal :class:`SetupSignal` at ``T0 + minute`` (for filter unit tests)."""
     return SetupSignal(

@@ -11,7 +11,7 @@ from tfex_s50_multi_tf_swing.signals.gate import apply_regime_gate, build_detect
 from tfex_s50_multi_tf_swing.signals.inputs import COL_REGIME
 from tfex_s50_multi_tf_swing.signals.models import NO_SIGNAL, SignalConfig
 
-from .conftest import LONG_BASE, SHORT_BASE, SWEEP_BASE, frame, to_row
+from .conftest import LONG_BASE, SHORT_BASE, frame, to_row
 
 
 def _classified(regimes: list[str | None], signals: list[str]) -> pl.DataFrame:
@@ -70,9 +70,11 @@ def test_build_detect_map_default_is_orb_only() -> None:
     assert set(detect) == {"B"}
 
 
-def test_build_detect_map_can_re_enable_all() -> None:
-    detect = build_detect_map(SignalConfig(), enabled=frozenset({"A", "B", "C"}))
-    assert set(detect) == {"A", "B", "C"}
+def test_build_detect_map_can_re_enable_a_and_b() -> None:
+    # Strategy C is permanently removed from the registry (1H-execution migration).
+    # Enabling all valid strategy IDs only activates A and B.
+    detect = build_detect_map(SignalConfig(), enabled=frozenset({"A", "B"}))
+    assert set(detect) == {"A", "B"}
 
 
 def test_build_detect_map_empty_when_nothing_enabled() -> None:
@@ -103,10 +105,13 @@ def test_widening_gate_lets_trend_down_through() -> None:
     assert signals[0].direction == "short"
 
 
-def test_sweep_strategy_disabled_by_default_pool() -> None:
-    # Strategy C fires on SWEEP_BASE (range_high_vol), but the default pool (B only) excludes it.
-    enabled_default = build_detect_map(SignalConfig(), enabled=frozenset({"B"}))
-    assert "C" not in enabled_default
-    # And even when enabled, the trend_up-only gate blocks its range_high_vol entries.
-    gated = build_detect_map(SignalConfig(), enabled=frozenset({"C"}))
-    assert gated["C"](frame([to_row(SWEEP_BASE)])) == []
+def test_sweep_strategy_permanently_disabled() -> None:
+    # Strategy C is permanently removed from the active registry (1H-execution migration).
+    # The default pool (B only) excludes it.
+    detect = build_detect_map(SignalConfig(), enabled=frozenset({"B"}))
+    assert "C" not in detect
+    # Building a detect map with only C (or including C) silently skips it — C is not
+    # in the _CLASSIFY / _TO_SIGNALS registries, so no detect function is built for it.
+    detect_with_c = build_detect_map(SignalConfig(), enabled=frozenset({"A", "B", "C"}))
+    assert "C" not in detect_with_c
+    assert set(detect_with_c) == {"A", "B"}

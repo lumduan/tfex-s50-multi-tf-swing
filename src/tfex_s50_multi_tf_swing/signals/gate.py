@@ -7,9 +7,12 @@ entries taken in unfavourable regimes. This module is the single, auditable, con
   :func:`~tfex_s50_multi_tf_swing.config.settings.Settings.enabled_strategy_ids` (default ``{"B"}``,
   ORB-only core), so disabling C or re-enabling A is a pure env change, never a code edit; and
 * **gates entries by HTF regime** (:func:`apply_regime_gate`) — a fired bar is demoted to a clean
-  "No Trade" whenever its 1H regime is outside the configured allow-set
+  "No Trade" whenever its **1D regime** (``1d_regime``) is outside the configured allow-set
   (:attr:`~tfex_s50_multi_tf_swing.signals.models.SignalConfig.allowed_regimes`, default
   ``{"trend_up"}``).
+
+Strategy C is **permanently removed** from the active registry (2026-06-05, 1H-execution
+migration) — the module stays importable but no code path reaches it.
 
 Both gates layer **on top of** the existing Phase-3 per-strategy regime whitelist (each strategy's
 ``classify_frame`` already restricts itself to its policy regimes) — they only ever *remove* trades,
@@ -24,7 +27,7 @@ from collections.abc import Callable
 import polars as pl
 
 from tfex_s50_multi_tf_swing.regime.models import Regime
-from tfex_s50_multi_tf_swing.signals import strategy_a, strategy_b, strategy_c
+from tfex_s50_multi_tf_swing.signals import strategy_a, strategy_b
 from tfex_s50_multi_tf_swing.signals.base import SIGNAL
 from tfex_s50_multi_tf_swing.signals.errors import SignalInputError
 from tfex_s50_multi_tf_swing.signals.inputs import COL_REGIME
@@ -45,12 +48,12 @@ DetectFn = Callable[[pl.DataFrame], list[SetupSignal]]
 _CLASSIFY: dict[StrategyId, Callable[[pl.DataFrame, SignalConfig], pl.DataFrame]] = {
     "A": lambda df, cfg: strategy_a.classify_frame(df, config=cfg),
     "B": lambda df, cfg: strategy_b.classify_frame(df, config=cfg),
-    "C": lambda df, cfg: strategy_c.classify_frame(df, config=cfg),
+    # "C" permanently disabled per the 1H-execution migration (2026-06-05).
 }
 _TO_SIGNALS: dict[StrategyId, DetectFn] = {
     "A": strategy_a.to_signals,
     "B": strategy_b.to_signals,
-    "C": strategy_c.to_signals,
+    # "C": strategy_c.to_signals,  # permanently disabled per the 1H-execution migration.
 }
 
 
@@ -133,6 +136,13 @@ def build_detect_map(
     detect: dict[StrategyId, DetectFn] = {}
     for sid in STRATEGY_IDS:
         if sid in enabled:
+            if sid not in _CLASSIFY:
+                logger.info(
+                    "build_detect_map: skipping %s — not in the active registry "
+                    "(permanently disabled per the 1H-execution migration)",
+                    sid,
+                )
+                continue
             detect[sid] = _build_detect(sid, sig_cfg, regimes)
     if not detect:
         logger.warning("build_detect_map: no strategies enabled (enabled=%s)", sorted(enabled))

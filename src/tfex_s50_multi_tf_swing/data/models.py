@@ -14,12 +14,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-Timeframe = Literal["5m", "1h", "4h"]
-"""Phase 1 supports exactly these three timeframes per ROADMAP §1.1."""
+Timeframe = Literal["5m", "1h", "4h", "1d"]
+"""Supported timeframes. ``1d`` added for the 1H-execution migration (Daily HTF regime/bias)."""
 
-TIMEFRAMES: tuple[Timeframe, ...] = ("5m", "1h", "4h")
+TIMEFRAMES: tuple[Timeframe, ...] = ("5m", "1h", "4h", "1d")
 
-TIMEFRAME_MINUTES: dict[Timeframe, int] = {"5m": 5, "1h": 60, "4h": 240}
+TIMEFRAME_MINUTES: dict[Timeframe, int] = {"5m": 5, "1h": 60, "4h": 240, "1d": 1440}
 """Bar duration in minutes — used by validators and the cross-TF consistency check."""
 
 

@@ -30,7 +30,7 @@ class _ListModel:
 
 def test_disabled_is_identity() -> None:
     frame = aligned_frame(6)
-    signals = [make_signal(minute=0), make_signal(minute=5)]
+    signals = [make_signal(minute=0), make_signal(minute=60)]
     out = filter_signals(signals, frame, config=_DISABLED, bundle=stub_bundle(0.99))
     assert out == signals
     assert out[0] is signals[0] and out[1] is signals[1]
@@ -54,18 +54,28 @@ def test_empty_signals_returns_empty() -> None:
     assert filter_signals([], frame, config=_ENABLED, bundle=stub_bundle(0.1)) == []
 
 
-def test_fake_breakout_rejects_high_probability() -> None:
+def test_trend_continuation_rejects_low_probability() -> None:
     frame = aligned_frame(6)
-    signals = [make_signal(strategy_id="C", minute=0), make_signal(strategy_id="C", minute=5)]
-    # P(fake)=0.9 > τ=0.5 → both dropped.
-    out = filter_signals(signals, frame, config=_ENABLED, bundle=stub_bundle(0.9))
+    signals = [make_signal(strategy_id="B", minute=0), make_signal(strategy_id="B", minute=60)]
+    # P(continuation)=0.1 < τ=0.5 → both dropped (B maps to trend_continuation).
+    out = filter_signals(
+        signals,
+        frame,
+        config=_ENABLED,
+        bundle=stub_bundle(0.1, target="trend_continuation"),
+    )
     assert out == []
 
 
-def test_fake_breakout_keeps_low_probability() -> None:
+def test_trend_continuation_keeps_high_probability() -> None:
     frame = aligned_frame(6)
-    signals = [make_signal(strategy_id="C", minute=0)]
-    out = filter_signals(signals, frame, config=_ENABLED, bundle=stub_bundle(0.1))
+    signals = [make_signal(strategy_id="B", minute=0)]
+    out = filter_signals(
+        signals,
+        frame,
+        config=_ENABLED,
+        bundle=stub_bundle(0.9, target="trend_continuation"),
+    )
     assert out == signals
 
 
@@ -85,29 +95,30 @@ def test_continuation_rejects_low_probability() -> None:
 
 def test_missing_model_for_target_passes_through() -> None:
     frame = aligned_frame(6)
-    # Strategy-C signals but only the continuation model is loaded → no gate for C.
-    signals = [make_signal(strategy_id="C", minute=0)]
-    bundle = stub_bundle(0.9, target="trend_continuation")
+    # Strategy-B signals but only the fake_breakout model is loaded → pass-through for B.
+    signals = [make_signal(strategy_id="B", minute=0)]
+    bundle = stub_bundle(0.9, target="fake_breakout")
     assert filter_signals(signals, frame, config=_ENABLED, bundle=bundle) == signals
 
 
 def test_missing_row_degrades_to_keep() -> None:
     frame = aligned_frame(6)
-    # minute=7 is off the 5-minute grid → no aligned row → keep despite a reject-prone model.
-    signals = [make_signal(strategy_id="C", minute=7)]
+    # minute=30 is off the 1H grid → no aligned row → keep despite a reject-prone model.
+    signals = [make_signal(strategy_id="B", minute=30)]
     assert filter_signals(signals, frame, config=_ENABLED, bundle=stub_bundle(0.9)) == signals
 
 
 def test_order_and_identity_preserved_on_selective_keep() -> None:
     frame = aligned_frame(12)
     signals = [
-        make_signal(strategy_id="C", minute=0),
-        make_signal(strategy_id="C", minute=5),
-        make_signal(strategy_id="C", minute=10),
+        make_signal(strategy_id="B", minute=0),
+        make_signal(strategy_id="B", minute=60),
+        make_signal(strategy_id="B", minute=120),
     ]
+    # B maps to trend_continuation; high=keep, low=reject. [0.1, 0.9, 0.1] → keep middle.
     bundle = ModelBundle(
-        models={"fake_breakout": _ListModel([0.9, 0.1, 0.9])},
-        cards={"fake_breakout": make_card("fake_breakout", threshold=0.5)},
+        models={"trend_continuation": _ListModel([0.1, 0.9, 0.1])},
+        cards={"trend_continuation": make_card("trend_continuation", threshold=0.5)},
     )
     out = filter_signals(signals, frame, config=_ENABLED, bundle=bundle)
     assert out == [signals[1]]
@@ -116,7 +127,12 @@ def test_order_and_identity_preserved_on_selective_keep() -> None:
 
 def test_info_log_emitted(caplog: pytest.LogCaptureFixture) -> None:
     frame = aligned_frame(6)
-    signals = [make_signal(strategy_id="C", minute=0)]
+    signals = [make_signal(strategy_id="B", minute=0)]
     with caplog.at_level(logging.INFO, logger="tfex_s50_multi_tf_swing.ml.filter"):
-        filter_signals(signals, frame, config=_ENABLED, bundle=stub_bundle(0.9))
-    assert any("ml filter target=fake_breakout" in rec.message for rec in caplog.records)
+        filter_signals(
+            signals,
+            frame,
+            config=_ENABLED,
+            bundle=stub_bundle(0.9, target="trend_continuation"),
+        )
+    assert any("ml filter target=trend_continuation" in rec.message for rec in caplog.records)
