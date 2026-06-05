@@ -7,7 +7,7 @@
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](Dockerfile)
 
 โครงการนี้ใช้กลยุทธ์ Multi-Timeframe Swing-Intraday บน **SET50 Index Futures (S50)** ของ TFEX
-โดยแยกชั้นเวลาเป็น 4H (regime), 1H (setup), และ 5m (execution) เพื่อหา setup ที่ expectancy
+โดยแยกชั้นเวลาเป็น 1D (regime/bias), 1H (setup + execution) เพื่อหา setup ที่ expectancy
 สูง ภายใต้กรอบ regime + risk management ที่เคร่งครัด
 
 **Multi-timeframe swing-intraday quant system for TFEX SET50 Index Futures (S50).**
@@ -49,18 +49,24 @@ under the standard ingestion contract.
 
 ## What this project does
 
-- **Multi-timeframe pipeline**: 4H regime + bias → 1H setup detection → 5m execution.
+- **Multi-timeframe pipeline**: 1D regime + bias → 1H setup detection + execution.
+  (Migrated from 4H/1H/5m, 2026-06-05.)
 - **Three core strategies**:
-  - A — Pullback Continuation (primary)
-  - B — Opening Range Breakout
-  - C — Liquidity Sweep Reversal
+  - A — Pullback Continuation (disabled by default)
+  - B — Opening Range Breakout ⭐ (sole active core — durable edge, 1H)
+  - C — Liquidity Sweep Reversal (permanently disabled)
 - **Regime-aware**: classifies bars into `trend_up`, `trend_down`, `range_low_vol`,
   `range_high_vol`, `panic` and turns strategies on or off accordingly. "No trade"
   is a feature.
 - **ML probability filter**: LightGBM gates rule-based signals via
   `P(trend_continuation)` and `P(fake_breakout)`. ML is a filter, not an oracle.
-- **Risk engine first**: ATR-scaled position sizing, daily loss limit, volatility
-  scaling, kill switch.
+  Default OFF — Phase-5 behaviour is byte-for-byte unchanged with the toggle off.
+- **Risk engine**: ATR-scaled position sizing (Decimal, `S50_MULTIPLIER = 200`),
+  daily/streak loss limits, volatility scaling, kill switch, capital-deployment
+  ladder. Phase-8 walk-forward harness drives it per trade.
+- **Walk-forward backtest**: anchored windows, configurable cost model (160 THB
+  round-trip commission + ATR-scaled slippage), drawdown-profile / Sharpe-Sortino /
+  regime-concentration metrics, per-window circuit breaker.
 - **Reports to gateway** via the umbrella's `POST /api/v1/ingest/daily-report`
   contract, mirroring the `csm-set` pattern.
 
@@ -83,9 +89,8 @@ Five layers, top-down:
 ```
 ┌──────────────────────────────────────────────┐
 │  Raw Market Data (multi-TF OHLCV)             │
-│  4H → Regime / Macro Bias                     │
-│  1H → Main Setup Detection                    │
-│  5m → Execution & Risk Optimisation           │
+│  1D → Regime / Macro Bias                     │
+│  1H → Main Setup Detection + Execution        │
 ├──────────────────────────────────────────────┤
 │  Data Layer                                   │
 │  Continuous Futures · Features · Validation   │
@@ -94,7 +99,7 @@ Five layers, top-down:
 │  Regime · HTF Bias · ML Probability Filter    │
 ├──────────────────────────────────────────────┤
 │  Execution Layer                              │
-│  Setups (A/B/C) · 5m Execution · Risk Engine  │
+│  Setups (B active; A/C disabled) · 1H Exec · Risk Engine │
 ├──────────────────────────────────────────────┤
 │  Validation & Deployment                      │
 │  Walk-Forward · Paper · Live                  │
@@ -114,10 +119,10 @@ serves the unified surface to OpenBB.
 | 2 — Feature Engineering | **Complete** (2026-05-29) |
 | 3 — Regime Detection | **Rule baseline + policy complete** (2026-05-29) — §3.2 clustering / §3.3 LightGBM deferred |
 | 4 — Higher-TF Bias Engine | **§4.1 filter + §4.2 output complete** (2026-06-03) — §4.3 backtest deferred to Phase 5; `4h` mirror-only |
-| 5 — Setup Detection & Signals | **§5.1–§5.4 + §5.5 harness complete** (2026-06-03) — Strategies A/B/C + 5m execution engine + per-strategy backtest (`signals/`, `execution/`, `backtest/`); positive-expectancy exit metric + ML filter deferred (data / Phase 6) |
-| 6 — ML Probability Filter | Not started |
-| 7 — Risk Engine | Not started |
-| 8 — Walk-Forward Backtest | Not started |
+| 5 — Setup Detection & Signals | **Complete** (2026-06-03) — Strategies A/B/C + 1H execution engine + per-strategy backtest (`signals/`, `execution/`, `backtest/`); positive-expectancy magnitude data-gated. Post-Phase-8: Strategy B (1H ORB) is the sole active core; A/C disabled by default |
+| 6 — ML Probability Filter | **Machinery complete** (2026-06-04) — default-OFF (`TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED=false`); real trained models + OOS A/B magnitude data-gated on 5-year backfill |
+| 7 — Risk Engine | **Complete** (2026-06-04) — sizing, daily/streak limits, volatility scaling, kill switch, capital ladder; admin endpoint deferred to `api/` |
+| 8 — Walk-Forward Backtest | **Machinery complete** (2026-06-04) — anchored harness driving Phase-7 risk engine per trade, cost model (160 THB round-trip), drawdown-profile / Sharpe-Sortino / regime-concentration metrics, per-window circuit breaker; exit-criteria magnitudes data-gated. Post-Phase-8: 1H-execution migration (1D regime/bias + 1H execution); dual-direction shorts via directional regime gate |
 | 9 — Paper Trading | Not started |
 | 10 — Live Deployment | Not started |
 | 11 — Adaptive Evolution | Future |
@@ -282,6 +287,181 @@ in `scripts/bias_counter_trend_demo.py`. Visualise with `scripts/visualise_bias.
 
 Plan reference: [`docs/plans/phase-4-htf-bias-engine.md`](docs/plans/phase-4-htf-bias-engine.md).
 
+### Phase 5 — Setup detection & signals
+
+Phase 5 implements three trading strategies — A (Pullback Continuation), B (Opening Range
+Breakout), C (Liquidity Sweep Reversal) — each gated by the Phase-4 HTF bias veto and Phase-3
+regime policy, plus a 1H execution engine and per-strategy backtest harness. **Post-Phase-8:
+Strategy B (1H ORB) is the sole active core; A and C are disabled by default** (config-driven,
+re-enablable via `TFEX_S50_MULTI_TF_SWING_ENABLED_STRATEGIES`).
+
+```python
+from tfex_s50_multi_tf_swing.signals import (
+    build_signal_inputs, build_detect_map, detect_signals,
+)
+from tfex_s50_multi_tf_swing.execution import ExecutionEngine, ExecutionConfig
+from tfex_s50_multi_tf_swing.backtest import run_per_strategy_backtest
+
+# Build the multi-TF signal substrate (causally-aligned HTF features on the base grid)
+inputs = build_signal_inputs(store, base_timeframe="1h")
+detect_map = build_detect_map(enabled_strategy_ids=["B"])
+signals = detect_signals(inputs.aligned, detect_map, signal_config)
+
+# Simulate execution (next-bar-open fill, ATR stop, partial+trail or full TP)
+engine = ExecutionEngine(ExecutionConfig())
+trades = [engine.simulate(s, raw_1h) for s in signals]
+
+# Per-strategy backtest (expectancy, profit factor, drawdown in R-multiples)
+result = run_per_strategy_backtest("B", store, signal_config, exec_config)
+```
+
+Execution fills next-bar-open (no same-bar look-ahead), clamps `k·ATR` to the structure stop,
+and supports partial-taking-profit + trailing the remainder (or full TP at
+`partial_fraction = 1.0`). PnL is in points + R; the 200-THB/pt multiplier and cost model
+are Phase 7/8.
+
+**Config:** `SignalConfig` / `ExecutionConfig` surfaced on `Settings` via
+`TFEX_S50_MULTI_TF_SWING_SIGNAL_*` / `_EXECUTION_*`.
+
+Plan reference: [`docs/plans/phase-5-setup-detection-signals.md`](docs/plans/phase-5-setup-detection-signals.md).
+
+### Phase 6 — ML probability filter
+
+Phase 6 adds a LightGBM filter that gates existing rule-based setups — it is a **filter, never a
+strategy** (hard rule #7). Two targets: `P(trend_continuation)` gates A/B (keep when high),
+`P(fake_breakout)` gates C (keep when low). **Default OFF**
+(`TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED=false`) — with the toggle off or no model artifact
+present, the filter is the identity function and Phase-5 behaviour is reproduced byte-for-byte.
+
+```python
+from tfex_s50_multi_tf_swing.ml import (
+    label_triple_barrier, build_feature_frame,
+    walk_forward_train, save_model, load_bundle,
+)
+from tfex_s50_multi_tf_swing.ml.filter import filter_signals
+
+# Train a model (owner-side, data-gated on the 5-year backfill)
+labels = label_triple_barrier(store, "trend_continuation")
+features = build_feature_frame(store, labels)
+model = walk_forward_train(features, labels)
+save_model(model, "trend_continuation")
+
+# Gate signals — identity function when disabled or no model present
+bundle = load_bundle("trend_continuation")
+filtered = filter_signals(signals, aligned_frame, bundle, ml_config)
+```
+
+Walk-forward only (never random split); feature-importance audit rejects models where one
+feature dominates. **Real trained models + the out-of-sample A/B magnitude claim remain
+data-gated** on the 5-year backfill.
+
+**Config:** `MLFilterConfig` surfaced on `Settings` via `TFEX_S50_MULTI_TF_SWING_ML_*`.
+
+Plan reference: [`docs/plans/phase-6-ml-probability-filter.md`](docs/plans/phase-6-ml-probability-filter.md).
+
+### Phase 7 — Risk engine
+
+Phase 7 turns sizing-ready signal/execution outputs into **contract-sized, risk-guarded
+decisions**. The engine sizes positions, enforces daily/streak limits, applies volatility
+scaling, and provides a kill switch — all before a single trade reaches the broker.
+
+```python
+from tfex_s50_multi_tf_swing.risk import (
+    evaluate_entry, RiskConfig, SessionRiskState,
+    S50_MULTIPLIER,  # Decimal("200") — the single named constant
+)
+
+config = RiskConfig()  # risk_per_trade_pct=0.005, per_window_loss_limit_r=-5
+session = SessionRiskState.fresh(bkk_date)
+
+# Kill-switch-first → session limits → sizing → ladder cap
+decision = evaluate_entry(
+    setup_signal, account_equity, session, config,
+    ladder_stage="micro_live",
+)
+# → RiskDecision(allowed=True, contracts=1, stop_price=..., ...)
+```
+
+- **Position sizing:** `contracts = floor(equity × risk_pct / (stop_distance × 200))`; sub-1 → 0
+  (never rounded up).
+- **Session limits:** immutable reducer — `-2R` daily loss halt, 3 consecutive losses pause,
+  configurable trade-count cap. No-averaging-down + no-widen-stop guards enforced.
+- **Volatility scaling:** reuses the Phase-3 regime label; halves size above
+  `high_vol_percentile`, no-trade in `panic`.
+- **Kill switch:** overrides everything (hard rule #8); manual override via
+  `TFEX_S50_MULTI_TF_SWING_RISK_KILL_SWITCH_ENGAGED`.
+- **Capital ladder:** runtime guard — paper 0 / micro-live 1 / validated 2 / scale 4 contracts
+  (the backtest runs at `scale` with full evidence; live deployment stays ladder-gated).
+
+**Money is `Decimal` end-to-end.** The kill-switch admin endpoint is deferred to `api/`; the
+ladder's live-evidence actuals are data-gated (Phase 9/10).
+
+**Config:** `RiskConfig` surfaced on `Settings` via `TFEX_S50_MULTI_TF_SWING_RISK_*`.
+
+Plan reference: [`docs/plans/phase-7-risk-engine.md`](docs/plans/phase-7-risk-engine.md).
+
+### Phase 8 — Walk-forward backtest
+
+Phase 8 extends the `backtest/` package with an **anchored walk-forward harness** that drives
+the Phase-7 risk engine per trade, a configurable cost model, and comprehensive metrics —
+proving the system survives across regimes with realistic costs.
+
+```python
+from tfex_s50_multi_tf_swing.backtest import (
+    generate_windows, drive_costed_trades, WalkForwardConfig,
+    CostModel, WindowResult,
+)
+
+config = WalkForwardConfig(mode="anchored")
+cost_model = CostModel()  # commission (160 THB round-trip) + ATR-scaled slippage + tick spread
+windows = generate_windows(data_span, config)
+
+for window in windows:
+    result: WindowResult = drive_costed_trades(
+        window, store, signal_config, exec_config, risk_config, cost_model,
+        ml_filter_factory=None,  # injectable per-window ML re-fit hook
+    )
+    # → result.metrics (expectancy, profit factor, drawdown_profile,
+    #    sharpe, sortino, regime_concentration)
+```
+
+**Key features:**
+- **Anchored walk-forward only** (hard rule #6) — train start fixed + expanding; rolling variant
+  configurable. Deterministic, no RNG.
+- **Risk-driven per trade** — `drive_costed_trades` calls `risk.decision.evaluate_entry` per
+  trade; shared daily `SessionRiskState` across strategies (portfolio-wide limits). The combined
+  run shares one session; per-strategy runs are isolated.
+- **Cost model** (`backtest/costs.py`): commission + clearing fee (`Decimal`, folded via
+  `S50_MULTIPLIER = 200`), ATR-scaled slippage (worse on night/lunch-edge illiquid sessions),
+  tick-based spread.
+- **Metrics** (extended `backtest/metrics.py`): drawdown profile (depth + time-underwater +
+  recovery), Sharpe/Sortino ratios, regime concentration (fails loudly when one regime carries
+  the edge).
+- **Per-window circuit breaker:** `-5R` cumulative net-R floor → suppresses further entries that
+  window (configurable via `TFEX_S50_MULTI_TF_SWING_RISK_PER_WINDOW_LOSS_LIMIT_R`). Trip logged
+  on `WindowResult.circuit_breaker_tripped`.
+- **Public-safe reporting:** `scripts/run_walk_forward.py` + `notebooks/08_walk_forward.ipynb`
+  write counts / R-metrics / NAV index only (never raw OHLCV) to `results/static/backtest/`.
+
+**Post-Phase-8 risk mitigations** (config-driven, all reversible via env):
+
+| Mitigation | Default | Env var |
+|---|---|---|
+| Active strategy pool | `B` only (ORB core) | `TFEX_S50_MULTI_TF_SWING_ENABLED_STRATEGIES` |
+| Entry regime gate | `trend_up` only | `TFEX_S50_MULTI_TF_SWING_SIGNAL_ALLOWED_REGIMES` |
+| Wider ATR stop | `k_atr_stop=2.0` | `TFEX_S50_MULTI_TF_SWING_EXECUTION_K_ATR_STOP` |
+| Stricter equity sizing | `risk_per_trade_pct=0.005` (0.5%) | `TFEX_S50_MULTI_TF_SWING_RISK_RISK_PER_TRADE_PCT` |
+| Per-window circuit breaker | `-5R` | `TFEX_S50_MULTI_TF_SWING_RISK_PER_WINDOW_LOSS_LIMIT_R` |
+
+**The exit-criteria magnitudes (positive expectancy after costs, drawdown within budget, regime
+stability) are data-gated** on the 5-year TFEX backfill + engine TFEX data — the harness + a
+synthetic demonstration ship now; the numbers arrive the moment that data lands.
+
+**Config:** `WalkForwardConfig` / `CostModel` surfaced on `Settings` via
+`TFEX_S50_MULTI_TF_SWING_WALK_FORWARD_*` / `_COST_*`.
+
+Plan reference: [`docs/plans/phase-8-walk-forward-backtest.md`](docs/plans/phase-8-walk-forward-backtest.md).
+
 ## Configuration reference
 
 Environment variables (prefix `TFEX_S50_MULTI_TF_SWING_*`, loaded via
@@ -299,8 +479,22 @@ Environment variables (prefix `TFEX_S50_MULTI_TF_SWING_*`, loaded via
 | `TFEX_S50_MULTI_TF_SWING_REGIME_RANGE_LOW_RV` | `0.30` | `range_low_vol` rv-percentile upper bound. |
 | `TFEX_S50_MULTI_TF_SWING_REGIME_RANGE_HIGH_RV` | `0.70` | `range_high_vol` rv-percentile reference. |
 | `TFEX_S50_MULTI_TF_SWING_REGIME_TREND_PERSIST_MIN` | `0.30` | min `\|trend_persistence\|` to call a tape trending. |
-| `TFEX_S50_MULTI_TF_SWING_BIAS_SLOPE_DEADBAND` | `0.0` | Noise band the 4H EMA slope must exceed before the bias votes directionally. |
-| `TFEX_S50_MULTI_TF_SWING_BIAS_VWAP_DEADBAND` | `0.0` | Noise band the VWAP distance must exceed before the bias votes directionally. |
+| `TFEX_S50_MULTI_TF_SWING_OHLCV_SOURCE` | `mirror` | OHLCV source: `mirror` (tvkit, legacy) or `engine` (Market Data Engine via gateway proxy). |
+| `TFEX_S50_MULTI_TF_SWING_MARKET_DATA_ENGINE_BASE_URL` | — | Base URL for the engine source (include `/api/v2/engines/market-data` proxy prefix). |
+| `TFEX_S50_MULTI_TF_SWING_ENABLED_STRATEGIES` | `B` | Comma-separated active strategy IDs (`A,B,C`). Default `B` only (ORB core). |
+| `TFEX_S50_MULTI_TF_SWING_SIGNAL_ALLOWED_REGIMES` | `trend_up` | Comma-separated regimes that permit entries (longs). |
+| `TFEX_S50_MULTI_TF_SWING_SIGNAL_SHORT_ALLOWED_REGIMES` | — | Regimes that permit short entries (default: same as `ALLOWED_REGIMES`). |
+| `TFEX_S50_MULTI_TF_SWING_EXECUTION_K_ATR_STOP` | `2.0` | ATR multiplier for stop distance. |
+| `TFEX_S50_MULTI_TF_SWING_EXECUTION_PARTIAL_TP_R` | `1.5` | Take-profit target in R-multiples. |
+| `TFEX_S50_MULTI_TF_SWING_EXECUTION_PARTIAL_FRACTION` | `0.5` | Fraction to close at TP target (1.0 = full close-out). |
+| `TFEX_S50_MULTI_TF_SWING_ML_FILTER_ENABLED` | `false` | Toggle ML probability filter (default OFF). |
+| `TFEX_S50_MULTI_TF_SWING_ML_MODEL_DIR` | `data/models` | Directory for trained model artifacts. |
+| `TFEX_S50_MULTI_TF_SWING_RISK_RISK_PER_TRADE_PCT` | `0.005` | Fraction of equity risked per trade (0.5%). |
+| `TFEX_S50_MULTI_TF_SWING_RISK_PER_WINDOW_LOSS_LIMIT_R` | `-5` | Cumulative net-R floor per walk-forward window (circuit breaker). |
+| `TFEX_S50_MULTI_TF_SWING_RISK_KILL_SWITCH_ENGAGED` | `false` | Manual kill switch — flattens positions + halts new entries. |
+| `TFEX_S50_MULTI_TF_SWING_WALK_FORWARD_TRAIN_SPAN_DAYS` | `240` | Training window length in calendar days. |
+| `TFEX_S50_MULTI_TF_SWING_WALK_FORWARD_TEST_SPAN_DAYS` | `90` | Test window length in calendar days. |
+| `TFEX_S50_MULTI_TF_SWING_COST_COMMISSION_ROUNDTRIP_THB` | `160` | Round-trip commission in THB (80 THB/side). |
 
 Never commit a real `.env` — copy `.env.example` and fill values locally.
 
@@ -331,9 +525,22 @@ Never commit a real `.env` — copy `.env.example` and fill values locally.
 │   └── plans/
 │       └── ROADMAP.md             # Canonical phase plan
 ├── src/
-│   └── tfex_s50_multi_tf_swing/   # (to be populated in Phase 1+)
-├── tests/                         # unit + integration
-├── data/                          # (gitignored) raw / cleaned / continuous / features / labels
+│   └── tfex_s50_multi_tf_swing/
+│       ├── adapters/              # Gateway ingestion (Phase 0)
+│       ├── config/                # pydantic-settings (Phase 0)
+│       ├── data/                  # OHLCV ingestion, continuous, sessions, store (Phase 1)
+│       ├── features/              # Feature engineering pipeline (Phase 2)
+│       ├── regime/                # Regime detection + policy (Phase 3)
+│       ├── bias/                  # HTF bias engine (Phase 4)
+│       ├── signals/               # Strategy A/B/C setup detection (Phase 5)
+│       ├── execution/             # Trade simulation engine (Phase 5)
+│       ├── backtest/              # Per-strategy + walk-forward backtest (Phases 5 + 8)
+│       ├── ml/                    # ML probability filter (Phase 6)
+│       └── risk/                  # Risk engine — sizing, limits, kill switch, ladder (Phase 7)
+├── tests/                         # unit + integration (mirrors src/ layout)
+├── scripts/                       # Owner CLI: refresh, build features, walk-forward, visualise
+├── notebooks/                     # Data quality, feature stability, bias viz, walk-forward
+├── data/                          # (gitignored) raw / cleaned / continuous / features / labels / models
 ├── results/                       # (committed) public-safe summaries
 ├── Dockerfile
 ├── docker-compose.yml
