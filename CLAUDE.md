@@ -422,6 +422,31 @@ and the umbrella reader-cutover knowledge
   5-year TFEX backfill + engine TFEX data — the harness + a synthetic demonstration ship now.
 - **Stayed ROADMAP-pure:** no FastAPI endpoint, no gateway `extended_data` change, no `live/` wiring.
 
+### Risk mitigation — drawdown control (post-Phase-8)
+
+A 14-month walk-forward exposed a **31.13R** max drawdown (Window 0), driven by the high-turnover
+Strategy C and by entries in unfavourable regimes. Four **config-driven** mitigations cut the tail
+risk without any gateway-contract or public/owner-mode change (all reversible via env):
+
+- **Active strategy pool is config-selected** (`signals/gate.py:build_detect_map`,
+  `Settings.enabled_strategy_ids`, `TFEX_S50_MULTI_TF_SWING_ENABLED_STRATEGIES`, default **`B`** —
+  ORB-only core). Strategy C (the drawdown driver) and the negative-expectancy Strategy A are
+  disabled by default but re-enablable with **no code edit** (e.g. `ENABLED_STRATEGIES=A,B,C`).
+- **Entry regime gate** (`signals/gate.py:apply_regime_gate`, `SignalConfig.allowed_regimes`,
+  `TFEX_S50_MULTI_TF_SWING_SIGNAL_ALLOWED_REGIMES`, default **`trend_up`**) — a vectorised Polars
+  pass demotes any fired bar whose 1H regime is outside the allow-set to a clean No-Trade (layers on
+  top of the existing Phase-3 per-strategy regime whitelist; only ever removes trades).
+- **Wider ATR stop + stricter equity sizing:** `k_atr_stop` default **2.0** (was 1.5);
+  `risk_per_trade_pct` default **0.005** (0.5%, was 1%; 1% is the documented aggressive option).
+  Sizing is unchanged in logic — already equity-based, `Decimal`, floors sub-1 contracts to 0.
+- **Per-window circuit breaker** (`RiskConfig.per_window_loss_limit_r`, default **`-5R`**, driven in
+  `backtest/walk_forward.py:drive_costed_trades`): once a window's cumulative net R breaches the
+  floor, every further entry that window is suppressed; the trip logs (window id / trades / drawdown)
+  and surfaces on `WindowResult.circuit_breaker_tripped`. Stateful per window; resets each boundary.
+
+`notebooks/08_walk_forward.ipynb` re-renders the before/after walk-forward (run with `with_4h=True`
+so ORB fires on the local snapshot). Real-data magnitudes stay **data-gated** on the 5-year backfill.
+
 ### Public data boundary
 
 Raw OHLCV columns (`open`, `high`, `low`, `close`, `volume`) and proprietary feature
