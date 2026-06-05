@@ -16,6 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tfex_s50_multi_tf_swing.backtest.costs import CostedTrade
 from tfex_s50_multi_tf_swing.regime.models import Regime
 from tfex_s50_multi_tf_swing.signals.models import StrategyId
 
@@ -140,6 +141,12 @@ class WindowResult(BaseModel):
     ending_equity: Decimal
     nav_index: float
     circuit_breaker_tripped: bool = False
+    # The taken trades (post-cost) for this window: each :class:`CostedTrade` carries the gross
+    # :class:`Trade` (entry/exit times + prices, gross R, exit reason, regime) plus the net R and
+    # the per-trade cost breakdown (commission / slippage / spread / roll-over). Empty when the
+    # window took no trades. Used for trade-log / deep-dive analysis — never serialised to the
+    # public JSON (it carries price levels).
+    trades: list[CostedTrade] = Field(default_factory=list)
 
 
 class WalkForwardResult(BaseModel):

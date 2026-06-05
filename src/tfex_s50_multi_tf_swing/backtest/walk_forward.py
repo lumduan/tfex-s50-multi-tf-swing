@@ -116,6 +116,7 @@ class _DriveResult:
     """Outcome of driving one set of costed trades through the risk engine."""
 
     taken: list[Trade] = field(default_factory=list)
+    taken_costed: list[CostedTrade] = field(default_factory=list)
     n_skipped: int = 0
     ending_equity: Decimal = _ZERO
     daily_returns: list[float] = field(default_factory=list)
@@ -154,6 +155,7 @@ def drive_costed_trades(
     ordered = sorted(costed, key=lambda ct: ct.gross.entry_time)
     equity = start_equity
     taken: list[Trade] = []
+    taken_costed: list[CostedTrade] = []
     skipped = 0
     daily_r: dict[date, Decimal] = defaultdict(lambda: _ZERO)
     current_day: date | None = None
@@ -193,6 +195,7 @@ def drive_costed_trades(
 
         net = ct.net_trade
         taken.append(net)
+        taken_costed.append(ct)
         equity += Decimal(decision.contracts) * net.pnl_points * S50_MULTIPLIER
         daily_r[bkk_day] += net.r_multiple
         window_cum_r += net.r_multiple
@@ -215,6 +218,7 @@ def drive_costed_trades(
     returns = [float(daily_r[d]) for d in sorted(daily_r)]
     return _DriveResult(
         taken=taken,
+        taken_costed=taken_costed,
         n_skipped=skipped,
         ending_equity=equity,
         daily_returns=returns,
@@ -297,6 +301,7 @@ def _window_result(
         ending_equity=drive.ending_equity,
         nav_index=nav,
         circuit_breaker_tripped=drive.breaker_tripped,
+        trades=drive.taken_costed,
     )
 
 

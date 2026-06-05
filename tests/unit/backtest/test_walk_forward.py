@@ -88,6 +88,22 @@ def test_drive_takes_winners_and_compounds_equity() -> None:
     assert out.daily_returns == [3.0]  # one trading day, three +1R trades
 
 
+def test_drive_retains_costed_trades_for_taken() -> None:
+    # The taken CostedTrades are retained (for the trade-log deep-dive) alongside the net trades;
+    # skipped candidates never appear in either list.
+    taken_trade = costed(make_trade(r=Decimal("1"), when=T0), net_r=Decimal("1"))
+    skipped_trade = costed(make_trade(regime="range_low_vol", when=T0), net_r=Decimal("1"))
+    out = drive_costed_trades(
+        [taken_trade, skipped_trade],
+        risk_config=_risk(),
+        start_equity=Decimal("200000"),
+        calendar=_cal(),
+    )
+    assert len(out.taken_costed) == len(out.taken) == 1
+    # The exact CostedTrade is retained (gross + net + cost breakdown) for the trade-log deep-dive.
+    assert out.taken_costed[0] is taken_trade
+
+
 def test_drive_skips_no_trade_regime() -> None:
     trade = costed(make_trade(regime="range_low_vol"), net_r=Decimal("1"))
     out = drive_costed_trades(
