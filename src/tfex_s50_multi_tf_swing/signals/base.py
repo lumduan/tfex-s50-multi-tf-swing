@@ -78,15 +78,17 @@ def reasons_expr(strategy_id: StrategyId, long_gate: pl.Expr, short_gate: pl.Exp
     return (
         pl.when(fired)
         .then(
-            pl.concat_list(
-                pl.format(
-                    "{} {} setup", pl.lit(strategy_id), direction_expr(long_gate, short_gate)
-                ),
-                pl.format("bias={}", COL_BIAS),
-                pl.format("regime={}", COL_REGIME),
-            )
+            (
+                pl.lit(strategy_id)
+                + pl.lit(" ")
+                + direction_expr(long_gate, short_gate)
+                + pl.lit(" setup | bias=")
+                + pl.col(COL_BIAS)
+                + pl.lit(" | regime=")
+                + pl.col(COL_REGIME)
+            ).str.split(pl.lit(" | "))
         )
-        .otherwise(pl.concat_list(pl.format("{} no setup", pl.lit(strategy_id))))
+        .otherwise((pl.lit(strategy_id) + pl.lit(" no setup")).str.split(pl.lit(" | ")))
     )
 
 
@@ -119,7 +121,13 @@ def to_signals(df: pl.DataFrame, *, strategy_id: StrategyId) -> list[SetupSignal
                 trigger_price=_to_decimal(row[TRIGGER_PRICE]),
                 stop_reference=_to_decimal(row[STOP_REFERENCE]),
                 regime=row.get(COL_REGIME),
-                reasons=list(row[REASONS]) if row[REASONS] is not None else [],
+                reasons=(
+                    row[REASONS].split(" | ")
+                    if isinstance(row[REASONS], str)
+                    else list(row[REASONS])
+                    if isinstance(row[REASONS], list)
+                    else []
+                ),
             )
         )
     return signals
