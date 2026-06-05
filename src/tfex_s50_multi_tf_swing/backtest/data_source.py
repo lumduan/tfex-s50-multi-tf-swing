@@ -7,10 +7,9 @@ proxy) or — for heavy full-history columnar scans — the engine's offline **P
 hard). When a required continuous frame is missing or empty this raises
 :class:`~tfex_s50_multi_tf_swing.backtest.errors.WalkForwardDataError`.
 
-The live ``engine`` fetch is owned by the refresh pipeline (``data/engine_fetcher.py``), so the
-snapshot is engine-sourced; this module only reads the resulting snapshot. ``4h`` is engine-declined
-(see the OHLCV-source section in ``CLAUDE.md``); when it is absent the aligned inputs default
-``4h_bias_direction`` to ``neutral`` (A/B emit nothing, C still runs).
+The 1H-execution migration (2026-06-05) loads ``1h`` + ``1d`` frames (was ``5m`` + ``1h`` +
+optional ``4h``). The ``1d`` frame carries regime + bias; the ``1h`` frame is the execution base.
+Both timeframes are served by the engine source.
 """
 
 from __future__ import annotations
@@ -33,8 +32,12 @@ _DEFAULT_ATR_PERIOD = 14
 def load_continuous_frames(
     store: ParquetStore, *, with_4h: bool = False
 ) -> dict[Timeframe, pl.DataFrame]:
-    """Read the 5m + 1h (+ optional 4h) continuous snapshot; raise on a missing / empty frame."""
-    timeframes: list[Timeframe] = ["5m", "1h"]
+    """Read the 1h + 1d continuous snapshot; raise on a missing / empty frame.
+
+    The ``with_4h`` parameter is retained for backward compatibility but the 4H frame is
+    no longer loaded by default — the regime and bias layers now run on 1D bars.
+    """
+    timeframes: list[Timeframe] = ["1h", "1d"]
     if with_4h:
         timeframes.append("4h")
 
@@ -55,15 +58,15 @@ def load_continuous_frames(
 
 
 def build_execution_bars(
-    frame_5m: pl.DataFrame, *, atr_period: int = _DEFAULT_ATR_PERIOD
+    frame: pl.DataFrame, *, atr_period: int = _DEFAULT_ATR_PERIOD
 ) -> pl.DataFrame:
     """Cast OHLC to float and append ``atr`` for the execution engine.
 
-    The real run feeds the **raw per-contract** 5m series (TFEX hard rule #3); the synthetic /
+    The real run feeds the **raw per-contract** 1H series (TFEX hard rule #3); the synthetic /
     snapshot demonstration uses the back-adjusted continuous as a documented stand-in until a raw
     multi-contract TFEX history exists.
     """
-    bars = frame_5m.with_columns(
+    bars = frame.with_columns(
         pl.col("open").cast(pl.Float64),
         pl.col("high").cast(pl.Float64),
         pl.col("low").cast(pl.Float64),

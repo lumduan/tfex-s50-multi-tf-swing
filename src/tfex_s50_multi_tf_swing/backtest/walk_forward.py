@@ -33,6 +33,7 @@ from tfex_s50_multi_tf_swing.backtest.costs import (
     CostedTrade,
     CostModel,
     apply_costs,
+    crosses_quarterly_expiry,
     is_illiquid_session,
 )
 from tfex_s50_multi_tf_swing.backtest.metrics import (
@@ -264,8 +265,15 @@ def _costed_trades_for_window(
         for trade in trades:
             atr_entry = atr_at.get(trade.entry_time, 0.0)
             illiquid = is_illiquid_session(calendar, trade.entry_time)
+            rollover = crosses_quarterly_expiry(trade.entry_time, trade.exit_time, calendar)
             costed.append(
-                apply_costs(trade, atr_at_entry=atr_entry, illiquid=illiquid, config=cost_model)
+                apply_costs(
+                    trade,
+                    atr_at_entry=atr_entry,
+                    illiquid=illiquid,
+                    config=cost_model,
+                    crosses_rollover=rollover,
+                )
             )
         by_sid[sid] = costed
     return by_sid

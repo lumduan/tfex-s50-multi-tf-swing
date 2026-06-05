@@ -48,7 +48,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 # tfex project timeframe → Market Data Engine timeframe literal. The engine
 # serves only ``1d | 1h | 5m``; ``4h`` is intentionally absent (see module docs).
-_TF_TO_ENGINE: Final[dict[Timeframe, str]] = {"5m": "5m", "1h": "1h"}
+_TF_TO_ENGINE: Final[dict[Timeframe, str]] = {"5m": "5m", "1h": "1h", "1d": "1d"}
 
 # Per-request bar cap. The engine bounds at 50000; refresh windows pass explicit
 # start/end so this only guards against an unexpectedly huge single-contract span.

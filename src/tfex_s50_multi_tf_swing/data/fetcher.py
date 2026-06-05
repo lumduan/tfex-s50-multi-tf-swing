@@ -47,6 +47,7 @@ _TF_INTERVAL: Final[dict[Timeframe, str]] = {
     "5m": "5",
     "1h": "60",
     "4h": "240",
+    "1d": "1440",
 }
 
 # Transient classes worth retrying. Other exceptions raise FetcherError immediately.

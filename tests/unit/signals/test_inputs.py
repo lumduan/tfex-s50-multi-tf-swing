@@ -1,9 +1,10 @@
-"""Tests for :func:`build_signal_inputs` — the aligned 5m substrate.
+"""Tests for :func:`build_signal_inputs` — the aligned 1H substrate.
 
-Covers the column contract, the look-ahead-free alignment (no HTF value leaks onto an earlier
-5m bar), and the engine-vs-mirror ``4h`` paths: when the 4H frame is absent (the ``engine``
-source declines ``4h``), ``4h_bias_direction`` defaults to ``"neutral"`` so A / B emit no signals
-while C — gated on the 1H regime — can still run.
+Covers the column contract, the look-ahead-free alignment (no 1D value leaks onto an
+earlier 1H bar), and the path when the 1D frame is absent: ``1d_bias_direction`` defaults
+to ``"neutral"`` so A / B emit no signals.
+
+Updated for the 1H-execution migration (2026-06-05): the required frames are ``1h`` + ``1d``.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ _SMALL = FeatureConfig(
     bb_period=10,
     keltner_period=10,
     realised_vol_windows=(5, 10),
-    opening_range_minutes=(15, 30),
+    opening_range_minutes=(15, 30, 60),
     initial_balance_minutes=30,
     liquidity_lookback=10,
     adx_period=5,
@@ -37,44 +38,44 @@ _SMALL = FeatureConfig(
 )
 
 
-def _frames(*, with_4h: bool) -> dict[Timeframe, pl.DataFrame]:
+def _frames(*, with_1d: bool = True) -> dict[Timeframe, pl.DataFrame]:
     frames: dict[Timeframe, pl.DataFrame] = {
-        "5m": ohlcv(n=120, interval_minutes=5),
-        "1h": ohlcv(n=60, interval_minutes=60),
+        "1h": ohlcv(n=120, interval_minutes=60),
     }
-    if with_4h:
-        frames["4h"] = ohlcv(n=40, interval_minutes=240)
+    if with_1d:
+        frames["1d"] = ohlcv(n=40, interval_minutes=1440)
     return frames
 
 
-def test_columns_present_with_4h() -> None:
-    out = build_signal_inputs(_frames(with_4h=True), feature_config=_SMALL)
+def test_columns_present_with_1d() -> None:
+    out = build_signal_inputs(_frames(with_1d=True), feature_config=_SMALL)
     for col in (
-        COL_BIAS,
-        COL_REGIME,
+        COL_BIAS,  # "1d_bias_direction"
+        COL_REGIME,  # "1d_regime"
         "close",
         "swing_high",
         "swing_low",
         "atr_ratio",
-        "or_high_15",
+        "or_high_60",
     ):
         assert col in out.columns
 
 
 def test_alignment_is_causal_no_leak() -> None:
-    # The first 5m bar (02:45) predates the first 1H close (03:45), so the 1H regime is unknown.
-    out = build_signal_inputs(_frames(with_4h=True), feature_config=_SMALL).sort("time")
+    # The first 1H bar predates the first 1D close, so the 1D regime is null on the first bar.
+    out = build_signal_inputs(_frames(with_1d=True), feature_config=_SMALL).sort("time")
     assert out.get_column(COL_REGIME).to_list()[0] is None
     assert out.get_column(COL_REGIME).null_count() < out.height  # later rows do resolve
 
 
-def test_missing_4h_defaults_bias_neutral() -> None:
-    out = build_signal_inputs(_frames(with_4h=False), feature_config=_SMALL)
-    assert set(out.get_column(COL_BIAS).to_list()) == {"neutral"}
+def test_missing_1d_raises() -> None:
+    # In the 1H-execution migration, 1d is a required frame — it carries both regime and bias.
+    with pytest.raises(SignalInputError, match="'1d'"):
+        build_signal_inputs(_frames(with_1d=False), feature_config=_SMALL)
 
 
-def test_requires_5m_and_1h() -> None:
-    with pytest.raises(SignalInputError, match="'5m'"):
-        build_signal_inputs({"1h": ohlcv(n=60, interval_minutes=60)}, feature_config=_SMALL)
+def test_requires_1h_and_1d() -> None:
     with pytest.raises(SignalInputError, match="'1h'"):
-        build_signal_inputs({"5m": ohlcv(n=120, interval_minutes=5)}, feature_config=_SMALL)
+        build_signal_inputs({"1d": ohlcv(n=40, interval_minutes=1440)}, feature_config=_SMALL)
+    with pytest.raises(SignalInputError, match="'1d'"):
+        build_signal_inputs({"1h": ohlcv(n=120, interval_minutes=60)}, feature_config=_SMALL)

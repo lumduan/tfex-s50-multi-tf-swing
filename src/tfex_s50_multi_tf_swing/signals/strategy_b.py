@@ -1,12 +1,12 @@
 """Strategy B — Opening-Range Breakout (ROADMAP §5.2).
 
-On the aligned 5m frame:
+On the aligned 1H frame:
 
-1. Opening range = the first ``or_window`` minutes (default 15), read from the pipeline columns
-   ``or_high_{or_window}`` / ``or_low_{or_window}``.
+1. Opening range = the first ``or_window`` minutes (default 60, i.e. the first 1H bar),
+   read from the pipeline columns ``or_high_{or_window}`` / ``or_low_{or_window}``.
 2. Breakout: ``close > or_high`` (long) / ``close < or_low`` (short) with volume expansion
    (``volume_expansion ≥ volume_expansion_min``).
-3. HTF-aligned: ``4h_bias_direction`` matches the breakout side.
+3. HTF-aligned: ``1d_bias_direction`` matches the breakout side.
 4. Suppressed in the lunch dead-zone (``lunch_zone_flag == 1``) and in any regime whose Phase-3
    policy does not whitelist B (which already excludes ``range_low_vol``).
 

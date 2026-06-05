@@ -51,7 +51,7 @@ def test_paths_obey_layout(tmp_path: Path) -> None:
 def test_unknown_timeframe_raises(tmp_path: Path) -> None:
     store = ParquetStore(tmp_path)
     with pytest.raises(StoreError):
-        store.raw_path("S50M2026", "1d")
+        store.raw_path("S50M2026", "1w")
 
 
 def test_write_then_read_raw_roundtrip(tmp_path: Path) -> None:

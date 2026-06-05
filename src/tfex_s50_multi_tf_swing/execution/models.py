@@ -52,7 +52,7 @@ class ExecutionConfig(BaseModel):
     partial_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
     breakeven_buffer: float = Field(default=0.0, ge=0.0)
     trail_atr_mult: float = Field(default=1.5, gt=0.0)
-    time_stop_bars: int = Field(default=24, ge=1)
+    time_stop_bars: int = Field(default=8, ge=1)
     max_spread_mult: float = Field(default=3.0, gt=0.0)
 
 

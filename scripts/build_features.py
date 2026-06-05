@@ -45,9 +45,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--base-timeframe",
-        default="5m",
+        default="1h",
         choices=list(TIMEFRAMES),
-        help="Base timeframe for the aligned multi-timeframe panel (default 5m).",
+        help="Base timeframe for the aligned panel (default 1h, 1H-execution migration).",
     )
     parser.add_argument(
         "--no-normalise",

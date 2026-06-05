@@ -57,10 +57,17 @@ def make_trade(
     sid: StrategyId = "A",
     direction: SetupDirection = "long",
     when: datetime | None = None,
+    exit_when: datetime | None = None,
+    bars_held: int = 1,
     exit_reason: ExitReason = "take_profit",
 ) -> Trade:
-    """A typed :class:`Trade` with a chosen R-multiple (risk = |entry − stop|)."""
+    """A typed :class:`Trade` with a chosen R-multiple (risk = |entry − stop|).
+
+    ``exit_when`` / ``bars_held`` let a test control holding duration (e.g. a trade that
+    spans a quarterly expiry); both default to a 1-bar, 5-minute hold.
+    """
     when = when or T0
+    exit_time = exit_when or when + timedelta(minutes=5)
     risk = abs(entry - stop)
     pnl_points = r * risk
     exit_price = entry + pnl_points if direction == "long" else entry - pnl_points
@@ -68,13 +75,13 @@ def make_trade(
         strategy_id=sid,
         direction=direction,
         entry_time=when,
-        exit_time=when + timedelta(minutes=5),
+        exit_time=exit_time,
         entry=entry,
         stop=stop,
         exit_price=exit_price,
         pnl_points=pnl_points,
         r_multiple=r,
-        bars_held=1,
+        bars_held=bars_held,
         exit_reason=exit_reason,
         regime=regime,
     )

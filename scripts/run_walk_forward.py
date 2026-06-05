@@ -73,6 +73,8 @@ def _window_to_dict(wr: WindowResult) -> dict[str, object]:
         "recovery_trades": wr.drawdown.recovery_trades,
         "sharpe": wr.ratios.sharpe,
         "sortino": wr.ratios.sortino,
+        "avg_holding_hours": wr.metrics.avg_holding_hours,
+        "avg_holding_market_days": wr.metrics.avg_holding_market_days,
         "nav_index": wr.nav_index,
         "circuit_breaker_tripped": wr.circuit_breaker_tripped,
     }
@@ -93,6 +95,8 @@ def _result_to_dict(result: WalkForwardResult) -> dict[str, object]:
         "win_rate": float(result.overall.win_rate),
         "sharpe": result.ratios.sharpe,
         "sortino": result.ratios.sortino,
+        "avg_holding_hours": result.overall.avg_holding_hours,
+        "avg_holding_market_days": result.overall.avg_holding_market_days,
         "regime_concentration": {
             "dominant_regime": conc.dominant_regime,
             "share": conc.share,
@@ -180,12 +184,13 @@ def _run(args: argparse.Namespace) -> int:
         bias_config=settings.bias_config(),
         signal_config=sig_cfg,
     )
-    raw_bars = build_execution_bars(frames["5m"])
+    raw_bars = build_execution_bars(frames["1h"])
 
     detect = build_detect_map(
         sig_cfg,
         enabled=settings.enabled_strategy_ids(),
-        allowed_regimes=sig_cfg.allowed_regimes,
+        long_regimes=sig_cfg.allowed_regimes,
+        short_regimes=sig_cfg.short_allowed_regimes,
     )
 
     risk_config, ladder_evidence = _backtest_risk(settings.risk_config())
@@ -216,7 +221,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--with-4h",
         action="store_true",
-        help="Include the 4H frame (mirror source only; the engine source declines 4h).",
+        help="Include the 4H frame (legacy; regime/bias now run on 1D bars — 4H is deprecated).",
     )
     parser.add_argument("--out-dir", type=Path, default=_DEFAULT_OUT)
     parser.add_argument(

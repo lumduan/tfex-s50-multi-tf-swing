@@ -1,18 +1,23 @@
 """Strategy A — Pullback Continuation ⭐ (primary) (ROADMAP §5.1).
 
-Pattern: impulse → pullback → compression → continuation, read on the aligned 5m frame:
+Pattern: impulse → pullback → compression → continuation, read on the aligned 1H frame:
 
-1. **4H** — HTF bias is directional (``4h_bias_direction``) and the **1H regime** whitelists A.
-2. **1H** — pullback to value: price near session VWAP (``|1h_dist_from_vwap| ≤ pullback_band``),
-   structure intact (HH/HL for long), ATR contracting (``1h_atr_ratio ≤ atr_contraction_max``),
-   volume contracting (``1h_volume_expansion ≤ volume_contraction_max``).
-3. **5m** — volatility compression (``bollinger_squeeze`` or ``atr_ratio`` below its threshold).
-4. **5m** — trigger: breakout of the recent swing high + VWAP reclaim (``dist_from_vwap > 0``) +
+1. **1D** — HTF bias is directional (``1d_bias_direction``) and the **1D regime** whitelists A.
+2. **1H** — pullback to value: price near session VWAP (``|dist_from_vwap| ≤ pullback_band``),
+   structure intact (HH/HL for long), ATR contracting (``atr_ratio ≤ atr_contraction_max``),
+   volume contracting (``volume_expansion ≤ volume_contraction_max``).
+3. **1H** — volatility compression (``bollinger_squeeze`` or ``atr_ratio`` below its threshold).
+4. **1H** — trigger: breakout of the recent swing high + VWAP reclaim (``dist_from_vwap > 0``) +
    volume expansion (``volume_expansion ≥ volume_expansion_min``).
 
 Short is the exact mirror. Like the bias engine, a setup fires only on **full agreement**; any
 failing or null gate yields no signal (never a guess). ``stop_reference`` is the opposite recent
 swing extreme — the structure invalidation the execution engine anchors its ``k·ATR`` stop to.
+
+.. note::
+   Strategy A is **disabled by default** (``ENABLED_STRATEGIES=B``). The column references
+   have been updated for the 1H-execution migration but the strategy is untested in the new
+   regime.
 """
 
 from __future__ import annotations
@@ -25,10 +30,6 @@ from tfex_s50_multi_tf_swing.regime.models import BEARISH_STRUCTURE, BULLISH_STR
 from tfex_s50_multi_tf_swing.signals import base
 from tfex_s50_multi_tf_swing.signals.inputs import (
     COL_BIAS,
-    COL_H1_ATR_RATIO,
-    COL_H1_STRUCT,
-    COL_H1_VOL_EXP,
-    COL_H1_VWAP,
     COL_REGIME,
 )
 from tfex_s50_multi_tf_swing.signals.models import (
@@ -41,18 +42,15 @@ from tfex_s50_multi_tf_swing.signals.models import (
 
 STRATEGY_ID: StrategyId = "A"
 
-#: Columns :func:`classify_frame` reads off the aligned 5m frame.
+#: Columns :func:`classify_frame` reads off the aligned 1H frame.
 REQUIRED_COLUMNS: tuple[str, ...] = (
     COL_BIAS,
     COL_REGIME,
-    COL_H1_VWAP,
-    COL_H1_STRUCT,
-    COL_H1_ATR_RATIO,
-    COL_H1_VOL_EXP,
-    "bollinger_squeeze",
-    "atr_ratio",
     "dist_from_vwap",
+    "structure",
+    "atr_ratio",
     "volume_expansion",
+    "bollinger_squeeze",
     "close",
     "swing_high",
     "swing_low",
@@ -87,10 +85,10 @@ def _long_gate(config: SignalConfig) -> pl.Expr:
     return (
         (pl.col(COL_BIAS) == "long")
         & pl.col(COL_REGIME).is_in(base.regimes_allowing(STRATEGY_ID))
-        & (pl.col(COL_H1_VWAP).abs() <= config.pullback_band)
-        & pl.col(COL_H1_STRUCT).is_in(list(BULLISH_STRUCTURE))
-        & (pl.col(COL_H1_ATR_RATIO) <= config.atr_contraction_max)
-        & (pl.col(COL_H1_VOL_EXP) <= config.volume_contraction_max)
+        & (pl.col("dist_from_vwap").abs() <= config.pullback_band)
+        & pl.col("structure").is_in(list(BULLISH_STRUCTURE))
+        & (pl.col("atr_ratio") <= config.atr_contraction_max)
+        & (pl.col("volume_expansion") <= config.volume_contraction_max)
         & _compression_expr(config)
         & (pl.col("close") > pl.col("swing_high"))
         & (pl.col("dist_from_vwap") > 0.0)
@@ -103,10 +101,10 @@ def _short_gate(config: SignalConfig) -> pl.Expr:
     return (
         (pl.col(COL_BIAS) == "short")
         & pl.col(COL_REGIME).is_in(base.regimes_allowing(STRATEGY_ID))
-        & (pl.col(COL_H1_VWAP).abs() <= config.pullback_band)
-        & pl.col(COL_H1_STRUCT).is_in(list(BEARISH_STRUCTURE))
-        & (pl.col(COL_H1_ATR_RATIO) <= config.atr_contraction_max)
-        & (pl.col(COL_H1_VOL_EXP) <= config.volume_contraction_max)
+        & (pl.col("dist_from_vwap").abs() <= config.pullback_band)
+        & pl.col("structure").is_in(list(BEARISH_STRUCTURE))
+        & (pl.col("atr_ratio") <= config.atr_contraction_max)
+        & (pl.col("volume_expansion") <= config.volume_contraction_max)
         & _compression_expr(config)
         & (pl.col("close") < pl.col("swing_low"))
         & (pl.col("dist_from_vwap") < 0.0)
@@ -121,14 +119,14 @@ def _compression_ok(f: SetupFeatures, config: SignalConfig) -> bool:
     )
 
 
-def _h1_pullback(f: SetupFeatures, config: SignalConfig, *, bullish: bool) -> bool:
+def _pullback_ok(f: SetupFeatures, config: SignalConfig, *, bullish: bool) -> bool:
     structure = BULLISH_STRUCTURE if bullish else BEARISH_STRUCTURE
     return (
-        f.h1_dist_from_vwap is not None
-        and abs(f.h1_dist_from_vwap) <= config.pullback_band
-        and f.h1_structure in structure
-        and base.le(f.h1_atr_ratio, config.atr_contraction_max)
-        and base.le(f.h1_volume_expansion, config.volume_contraction_max)
+        f.dist_from_vwap is not None
+        and abs(f.dist_from_vwap) <= config.pullback_band
+        and f.structure in structure
+        and base.le(f.atr_ratio, config.atr_contraction_max)
+        and base.le(f.volume_expansion, config.volume_contraction_max)
     )
 
 
@@ -136,7 +134,7 @@ def _row_long(f: SetupFeatures, config: SignalConfig) -> bool:
     return (
         f.bias_direction == "long"
         and f.regime in base.regimes_allowing(STRATEGY_ID)
-        and _h1_pullback(f, config, bullish=True)
+        and _pullback_ok(f, config, bullish=True)
         and _compression_ok(f, config)
         and f.swing_high is not None
         and base.gt(f.close, f.swing_high)
@@ -150,7 +148,7 @@ def _row_short(f: SetupFeatures, config: SignalConfig) -> bool:
     return (
         f.bias_direction == "short"
         and f.regime in base.regimes_allowing(STRATEGY_ID)
-        and _h1_pullback(f, config, bullish=False)
+        and _pullback_ok(f, config, bullish=False)
         and _compression_ok(f, config)
         and f.swing_low is not None
         and base.lt(f.close, f.swing_low)
