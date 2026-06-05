@@ -47,9 +47,12 @@ class RiskConfig(BaseModel):
     """Risk-engine knobs (frozen + bounded so an out-of-range env override fails at load).
 
     Every default reproduces the documented :mod:`risk-engine` spec, so an unset environment is a
-    no-op. ``risk_per_trade_pct`` is the fraction of equity risked per trade (1 % default);
+    no-op. ``risk_per_trade_pct`` is the fraction of **current** equity risked per trade (**0.5 %**
+    default — tightened from 1 % as a risk mitigation; 1 % is the documented aggressive option);
     ``daily_loss_limit_r`` halts the session at ``-2R`` cumulative; the streak / trade-count caps
-    prevent tilt. ``high_vol_size_factor`` halves size above ``high_vol_percentile``;
+    prevent tilt. ``per_window_loss_limit_r`` is the per-walk-forward-window circuit-breaker floor
+    (``-5R``): once a window's cumulative net R breaches it, all further entries that window are
+    suppressed. ``high_vol_size_factor`` halves size above ``high_vol_percentile``;
     ``panic_no_trade`` forces no-trade in the panic regime. The kill-switch budgets and the ladder
     contract caps live here too — no magic number is allowed at a call site.
     """
@@ -57,12 +60,18 @@ class RiskConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     # §7.1 sizing.
-    risk_per_trade_pct: float = Field(default=0.01, gt=0.0, le=1.0)
+    risk_per_trade_pct: float = Field(default=0.005, gt=0.0, le=1.0)
 
     # §7.2 daily & streak limits.
     daily_loss_limit_r: float = Field(default=2.0, gt=0.0)
     max_consecutive_losses: int = Field(default=3, ge=1)
     max_trades_per_day: int = Field(default=6, ge=1)
+
+    # Per-window circuit breaker (risk mitigation): cumulative net R floor for a single
+    # walk-forward window. Negative; once a window's running net R is ≤ this, the harness halts all
+    # further entries for the remainder of that window. Mirrors ``daily_loss_limit_r`` but at the
+    # window grain (the daily limit is a positive magnitude; this is a signed floor).
+    per_window_loss_limit_r: float = Field(default=-5.0, lt=0.0)
 
     # §7.3 volatility scaling.
     high_vol_percentile: float = Field(default=0.70, ge=0.0, le=1.0)

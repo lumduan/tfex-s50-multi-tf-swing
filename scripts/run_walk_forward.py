@@ -24,7 +24,6 @@ import argparse
 import json
 import logging
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
@@ -39,18 +38,17 @@ from tfex_s50_multi_tf_swing.backtest.models import (
     WalkForwardResult,
     WindowResult,
 )
-from tfex_s50_multi_tf_swing.backtest.per_strategy import DetectFn, SignalFilter
+from tfex_s50_multi_tf_swing.backtest.per_strategy import SignalFilter
 from tfex_s50_multi_tf_swing.backtest.walk_forward import MLFilterFactory, run_walk_forward
 from tfex_s50_multi_tf_swing.config.settings import get_settings
 from tfex_s50_multi_tf_swing.data.store import ParquetStore
 from tfex_s50_multi_tf_swing.ml.filter import filter_signals
 from tfex_s50_multi_tf_swing.ml.store import load_bundle
 from tfex_s50_multi_tf_swing.risk.models import LadderEvidence, RiskConfig
-from tfex_s50_multi_tf_swing.signals import strategy_a, strategy_b, strategy_c
+from tfex_s50_multi_tf_swing.signals.gate import build_detect_map
 from tfex_s50_multi_tf_swing.signals.inputs import build_signal_inputs
 from tfex_s50_multi_tf_swing.signals.models import (
     SetupSignal,
-    SignalConfig,
     StrategyId,
 )
 
@@ -58,12 +56,6 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 _LOG_FORMAT: Final[str] = "%(asctime)s [%(levelname)-7s] %(name)s - %(message)s"
 _DEFAULT_OUT: Final[Path] = Path("results/static/backtest")
-
-_DETECT: dict[StrategyId, Callable[[pl.DataFrame, SignalConfig], list[SetupSignal]]] = {
-    "A": lambda df, cfg: strategy_a.to_signals(strategy_a.classify_frame(df, config=cfg)),
-    "B": lambda df, cfg: strategy_b.to_signals(strategy_b.classify_frame(df, config=cfg)),
-    "C": lambda df, cfg: strategy_c.to_signals(strategy_c.classify_frame(df, config=cfg)),
-}
 
 
 def _window_to_dict(wr: WindowResult) -> dict[str, object]:
@@ -82,6 +74,7 @@ def _window_to_dict(wr: WindowResult) -> dict[str, object]:
         "sharpe": wr.ratios.sharpe,
         "sortino": wr.ratios.sortino,
         "nav_index": wr.nav_index,
+        "circuit_breaker_tripped": wr.circuit_breaker_tripped,
     }
 
 
@@ -157,17 +150,6 @@ def _ml_factory(model_dir: Path) -> MLFilterFactory | None:
     return factory
 
 
-def _bind(
-    detect_fn: Callable[[pl.DataFrame, SignalConfig], list[SetupSignal]], cfg: SignalConfig
-) -> DetectFn:
-    """Bind the signal config into a strategy's detect step (typed; no untyped lambda)."""
-
-    def run(df: pl.DataFrame) -> list[SetupSignal]:
-        return detect_fn(df, cfg)
-
-    return run
-
-
 def _backtest_risk(settings_risk: RiskConfig) -> tuple[RiskConfig, LadderEvidence]:
     """Pick a backtest deployment stage + evidence (``paper`` caps to 0 contracts).
 
@@ -200,11 +182,17 @@ def _run(args: argparse.Namespace) -> int:
     )
     raw_bars = build_execution_bars(frames["5m"])
 
+    detect = build_detect_map(
+        sig_cfg,
+        enabled=settings.enabled_strategy_ids(),
+        allowed_regimes=sig_cfg.allowed_regimes,
+    )
+
     risk_config, ladder_evidence = _backtest_risk(settings.risk_config())
     report = run_walk_forward(
         inputs=inputs,
         raw_bars=raw_bars,
-        detect={sid: _bind(detect, sig_cfg) for sid, detect in _DETECT.items()},
+        detect=detect,
         wf_config=settings.walk_forward_config(),
         exec_config=settings.execution_config(),
         risk_config=risk_config,

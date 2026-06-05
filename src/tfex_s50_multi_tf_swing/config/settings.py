@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from tfex_s50_multi_tf_swing.ml.models import MLFilterConfig
     from tfex_s50_multi_tf_swing.regime.models import RegimeThresholds
     from tfex_s50_multi_tf_swing.risk.models import RiskConfig
-    from tfex_s50_multi_tf_swing.signals.models import SignalConfig
+    from tfex_s50_multi_tf_swing.signals.models import SignalConfig, StrategyId
 
 
 class Settings(BaseSettings):
@@ -113,8 +113,18 @@ class Settings(BaseSettings):
     signal_require_structure_shift: bool = True
     signal_swing_window: int = Field(default=12, ge=2)
 
+    # Risk mitigation — active strategy pool + entry regime gate (config-driven, reversible).
+    # ``enabled_strategies`` is the comma-separated set of strategy ids the detect map activates
+    # (default ``B`` — ORB-only core; Strategy C, the 31.13R-drawdown driver, and the
+    # negative-expectancy Strategy A are disabled-by-default but re-enablable with no code edit,
+    # e.g. ``A,B,C``). ``signal_allowed_regimes`` is the comma-separated 1H-regime allow-set the
+    # gate permits entries in (default ``trend_up`` only). Both are validated at load.
+    enabled_strategies: str = "B"
+    signal_allowed_regimes: str = "trend_up"
+
     # Phase 5 — execution-engine knobs. Bounds mirror ``execution.ExecutionConfig``.
-    execution_k_atr_stop: float = Field(default=1.5, gt=0.0)
+    # ``execution_k_atr_stop`` default widened 1.5 → 2.0 (risk mitigation: wider noise buffer).
+    execution_k_atr_stop: float = Field(default=2.0, gt=0.0)
     execution_partial_tp_r: float = Field(default=1.0, gt=0.0)
     execution_partial_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
     execution_breakeven_buffer: float = Field(default=0.0, ge=0.0)
@@ -134,10 +144,11 @@ class Settings(BaseSettings):
     # Phase 7 — risk engine. Bounds mirror ``risk.models.RiskConfig``; an unset env reproduces the
     # documented risk-engine spec, so the defaults are a no-op. ``risk_deployment_stage`` is typed
     # ``str`` here (validated against the Literal when ``risk_config()`` builds ``RiskConfig``).
-    risk_per_trade_pct: float = Field(default=0.01, gt=0.0, le=1.0)
+    risk_per_trade_pct: float = Field(default=0.005, gt=0.0, le=1.0)
     risk_daily_loss_limit_r: float = Field(default=2.0, gt=0.0)
     risk_max_consecutive_losses: int = Field(default=3, ge=1)
     risk_max_trades_per_day: int = Field(default=6, ge=1)
+    risk_per_window_loss_limit_r: float = Field(default=-5.0, lt=0.0)
     risk_high_vol_percentile: float = Field(default=0.70, ge=0.0, le=1.0)
     risk_high_vol_size_factor: float = Field(default=0.5, ge=0.0, le=1.0)
     risk_panic_no_trade: bool = True
@@ -172,9 +183,19 @@ class Settings(BaseSettings):
     cost_spread_ticks: float = Field(default=1.0, ge=0.0)
 
     def signal_config(self) -> SignalConfig:
-        """Build a :class:`SignalConfig` from the configured signal fields (lazy import)."""
+        """Build a :class:`SignalConfig` from the configured signal fields (lazy import).
+
+        ``signal_allowed_regimes`` (a comma-separated string, validated at load) is parsed into the
+        ``allowed_regimes`` frozenset the entry gate (``signals.gate.apply_regime_gate``) consumes.
+        """
+        from tfex_s50_multi_tf_swing.regime.models import Regime
         from tfex_s50_multi_tf_swing.signals.models import SignalConfig
 
+        allowed_regimes = frozenset(
+            cast(Regime, token.strip())
+            for token in self.signal_allowed_regimes.split(",")
+            if token.strip()
+        )
         return SignalConfig(
             pullback_band=self.signal_pullback_band,
             atr_contraction_max=self.signal_atr_contraction_max,
@@ -185,6 +206,22 @@ class Settings(BaseSettings):
             or_window=self.signal_or_window,
             require_structure_shift=self.signal_require_structure_shift,
             swing_window=self.signal_swing_window,
+            allowed_regimes=allowed_regimes,
+        )
+
+    def enabled_strategy_ids(self) -> frozenset[StrategyId]:
+        """Parse ``enabled_strategies`` (validated at load) into the active strategy-id set.
+
+        Used by ``signals.gate.build_detect_map`` to select the active pool. Default ``{"B"}``
+        (ORB-only core); re-enabling C / A is a pure env change (``TFEX_S50_MULTI_TF_SWING_
+        ENABLED_STRATEGIES=A,B,C``), never a code edit.
+        """
+        from tfex_s50_multi_tf_swing.signals.models import StrategyId
+
+        return frozenset(
+            cast(StrategyId, token.strip().upper())
+            for token in self.enabled_strategies.split(",")
+            if token.strip()
         )
 
     def execution_config(self) -> ExecutionConfig:
@@ -232,6 +269,7 @@ class Settings(BaseSettings):
             daily_loss_limit_r=self.risk_daily_loss_limit_r,
             max_consecutive_losses=self.risk_max_consecutive_losses,
             max_trades_per_day=self.risk_max_trades_per_day,
+            per_window_loss_limit_r=self.risk_per_window_loss_limit_r,
             high_vol_percentile=self.risk_high_vol_percentile,
             high_vol_size_factor=self.risk_high_vol_size_factor,
             panic_no_trade=self.risk_panic_no_trade,
@@ -315,6 +353,34 @@ class Settings(BaseSettings):
         allowed: set[str] = {"mirror", "engine"}
         if value not in allowed:
             raise ValueError(f"ohlcv_source must be one of {sorted(allowed)!r}, got {value!r}")
+        return value
+
+    @field_validator("enabled_strategies")
+    @classmethod
+    def _validate_enabled_strategies(cls, value: str) -> str:
+        """Reject an unknown strategy id at load time (the set must be ⊆ ``STRATEGY_IDS``)."""
+        from tfex_s50_multi_tf_swing.signals.models import STRATEGY_IDS
+
+        tokens = [token.strip().upper() for token in value.split(",") if token.strip()]
+        invalid = sorted({token for token in tokens if token not in STRATEGY_IDS})
+        if invalid:
+            raise ValueError(
+                f"enabled_strategies has unknown ids {invalid}; expected ⊆ {list(STRATEGY_IDS)}"
+            )
+        return value
+
+    @field_validator("signal_allowed_regimes")
+    @classmethod
+    def _validate_signal_allowed_regimes(cls, value: str) -> str:
+        """Reject an unknown regime at load time (the allow-set must be ⊆ ``REGIMES``)."""
+        from tfex_s50_multi_tf_swing.regime.models import REGIMES
+
+        tokens = [token.strip() for token in value.split(",") if token.strip()]
+        invalid = sorted({token for token in tokens if token not in REGIMES})
+        if invalid:
+            raise ValueError(
+                f"signal_allowed_regimes has unknown regimes {invalid}; expected ⊆ {list(REGIMES)}"
+            )
         return value
 
     @model_validator(mode="after")

@@ -131,6 +131,7 @@ class WindowResult(BaseModel):
     n_skipped_by_risk: int = Field(ge=0)
     ending_equity: Decimal
     nav_index: float
+    circuit_breaker_tripped: bool = False
 
 
 class WalkForwardResult(BaseModel):

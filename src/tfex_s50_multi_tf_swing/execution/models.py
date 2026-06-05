@@ -36,7 +36,9 @@ EXIT_REASONS: tuple[ExitReason, ...] = get_args(ExitReason)
 class ExecutionConfig(BaseModel):
     """Entry / exit / management knobs for :func:`simulate_trade`.
 
-    ``k_atr_stop`` widens the structure stop to at least ``k·ATR`` from entry (noise buffer).
+    ``k_atr_stop`` widens the structure stop to at least ``k·ATR`` from entry (noise buffer); the
+    default is **2.0** (widened from 1.5 as a risk mitigation — a wider stop reduces noise /
+    stop-hunt exits, and sizing shrinks proportionally so the per-trade risk budget is unchanged).
     At ``partial_tp_r`` (1R) the engine banks ``partial_fraction`` (50 %) and moves the stop to
     breakeven (entry ± ``breakeven_buffer``); the remainder trails ``trail_atr_mult·ATR`` behind
     the best close. ``time_stop_bars`` forces an exit if no target is reached; ``max_spread_mult``
@@ -45,7 +47,7 @@ class ExecutionConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    k_atr_stop: float = Field(default=1.5, gt=0.0)
+    k_atr_stop: float = Field(default=2.0, gt=0.0)
     partial_tp_r: float = Field(default=1.0, gt=0.0)
     partial_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
     breakeven_buffer: float = Field(default=0.0, ge=0.0)
