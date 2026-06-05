@@ -19,7 +19,9 @@ from tfex_s50_multi_tf_swing.risk.models import (
 )
 
 DAY = date(2026, 6, 4)
-MICRO = RiskConfig(deployment_stage="micro_live")
+# Pin the 1% per-trade budget so the worked example sizes exactly 1 contract (the default is now
+# 0.5%, a risk mitigation, which would size this 100k/5pt case to 0 — covered in test_sizing.py).
+MICRO = RiskConfig(deployment_stage="micro_live", risk_per_trade_pct=0.01)
 
 
 def test_happy_path_sizes_one_contract() -> None:

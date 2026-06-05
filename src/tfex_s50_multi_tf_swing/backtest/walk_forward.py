@@ -118,6 +118,7 @@ class _DriveResult:
     n_skipped: int = 0
     ending_equity: Decimal = _ZERO
     daily_returns: list[float] = field(default_factory=list)
+    breaker_tripped: bool = False
 
 
 def drive_costed_trades(
@@ -127,6 +128,7 @@ def drive_costed_trades(
     start_equity: Decimal,
     calendar: SessionCalendar,
     ladder_evidence: LadderEvidence | None = None,
+    window_index: int | None = None,
 ) -> _DriveResult:
     """Size every costed trade through ``evaluate_entry``; return the taken net trades + equity.
 
@@ -135,11 +137,19 @@ def drive_costed_trades(
     count limits react to post-cost outcomes). A trade is skipped when the engine disallows it
     (kill switch / halt / no-trade regime / sub-1 contract) or when equity has been wiped out.
 
+    **Per-window circuit breaker.** A running ``window_cum_r`` accumulates the net R of taken
+    trades from the start of this call (= one walk-forward window). Once it breaches
+    ``risk_config.per_window_loss_limit_r`` (default ``-5R``), the breaker trips: the event is
+    logged (``window_index``, trades taken, drawdown-at-trip) and **every remaining candidate this
+    window is suppressed** (counted into ``n_skipped``). Each call is one window, so the breaker
+    auto-resets at the next window boundary. ``window_index`` is for the log line only.
+
     ``ladder_evidence`` is threaded into the capital-deployment guard. **The ladder caps the
     ``paper`` stage to 0 contracts**, so a backtest must run ``risk_config`` at ``micro_live`` or
     higher (with matching evidence) — ``paper`` is logic-validation only and takes no trades.
     """
     evidence = ladder_evidence if ladder_evidence is not None else LadderEvidence()
+    breaker_floor = Decimal(str(risk_config.per_window_loss_limit_r))
     ordered = sorted(costed, key=lambda ct: ct.gross.entry_time)
     equity = start_equity
     taken: list[Trade] = []
@@ -147,8 +157,14 @@ def drive_costed_trades(
     daily_r: dict[date, Decimal] = defaultdict(lambda: _ZERO)
     current_day: date | None = None
     session = start_session(date(1970, 1, 1))
+    window_cum_r = _ZERO
+    breaker_tripped = False
 
-    for ct in ordered:
+    for i, ct in enumerate(ordered):
+        if breaker_tripped:
+            skipped += 1
+            continue
+
         bkk_day = ct.gross.entry_time.astimezone(BKK).date()
         if bkk_day != current_day:
             current_day = bkk_day
@@ -178,12 +194,31 @@ def drive_costed_trades(
         taken.append(net)
         equity += Decimal(decision.contracts) * net.pnl_points * S50_MULTIPLIER
         daily_r[bkk_day] += net.r_multiple
+        window_cum_r += net.r_multiple
         session = register_outcome(
             session, TradeOutcome(r_multiple=net.r_multiple, session_date=bkk_day), risk_config
         )
 
+        if window_cum_r <= breaker_floor:
+            breaker_tripped = True
+            logger.warning(
+                "circuit breaker tripped (window=%s): cumulative %sR ≤ floor %sR after %d "
+                "trade(s); suppressing %d remaining candidate(s) this window",
+                window_index,
+                window_cum_r,
+                breaker_floor,
+                len(taken),
+                len(ordered) - i - 1,
+            )
+
     returns = [float(daily_r[d]) for d in sorted(daily_r)]
-    return _DriveResult(taken=taken, n_skipped=skipped, ending_equity=equity, daily_returns=returns)
+    return _DriveResult(
+        taken=taken,
+        n_skipped=skipped,
+        ending_equity=equity,
+        daily_returns=returns,
+        breaker_tripped=breaker_tripped,
+    )
 
 
 def _slice(df: pl.DataFrame, start: datetime, end: datetime) -> pl.DataFrame:
@@ -253,6 +288,7 @@ def _window_result(
         n_skipped_by_risk=drive.n_skipped,
         ending_equity=drive.ending_equity,
         nav_index=nav,
+        circuit_breaker_tripped=drive.breaker_tripped,
     )
 
 
@@ -338,6 +374,7 @@ def run_walk_forward(
             start_equity=combined_equity,
             calendar=cal,
             ladder_evidence=ladder_evidence,
+            window_index=window.index,
         )
         combined_results.append(_window_result(window, drive, combined_equity, strategy_id=None))
         combined_trades.extend(drive.taken)
@@ -351,6 +388,7 @@ def run_walk_forward(
                 start_equity=sid_equity[sid],
                 calendar=cal,
                 ladder_evidence=ladder_evidence,
+                window_index=window.index,
             )
             sid_results[sid].append(_window_result(window, sd, sid_equity[sid], strategy_id=sid))
             sid_trades[sid].extend(sd.taken)

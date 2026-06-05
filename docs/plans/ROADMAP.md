@@ -17,6 +17,32 @@ before the next begins. The goal is a **robust live system, not a beautiful back
 
 ---
 
+## Risk Mitigation — Drawdown Control (post-Phase-8)
+
+A 14-month, 5m-bar anchored walk-forward (the Phase-8 harness on the local snapshot) exposed an
+extreme **Max Drawdown of 31.13R** concentrated in Window 0, driven mostly by the high-turnover
+Strategy C (Sweep) and by entries in unfavourable regimes. Per-strategy: A (Pullback) 7 trades
+expectancy −0.10R; B (ORB) 31 trades **+0.12R / 58.1% win** (the durable edge); C (Sweep) 294
+trades +0.01R / 49.0% win (bleeds equity). 61.7% of profit came from `trend_up`; worst losses
+clustered in `range_high_vol`. Four config-driven mitigations were layered in (no gateway-contract
+or public/owner-mode change):
+
+| # | Mitigation | Where | Default |
+|---|------------|-------|---------|
+| 1 | **Disable C, promote ORB to core** — config-selected active pool | `signals/gate.py:build_detect_map`, `Settings.enabled_strategy_ids` (`ENABLED_STRATEGIES`) | `B` only (A, C off, re-enablable) |
+| 2 | **Regime gate** — block entries outside the allow-set | `signals/gate.py:apply_regime_gate`, `SignalConfig.allowed_regimes` (`SIGNAL_ALLOWED_REGIMES`) | `trend_up` (blocks `trend_down` / `range_high_vol`) |
+| 3 | **Wider ATR stop + stricter equity sizing** | `ExecutionConfig.k_atr_stop`; `RiskConfig.risk_per_trade_pct` | `k_atr_stop=2.0` (was 1.5); `risk_per_trade_pct=0.005` (was 0.01; 1% optional) |
+| 4 | **Per-window circuit breaker** — cumulative-R kill switch | `RiskConfig.per_window_loss_limit_r`; `backtest/walk_forward.py:drive_costed_trades` | `-5R` → suppress all further entries that window |
+
+Sizing was already equity-based, `Decimal`, and floors sub-1 contracts to 0 (no logic change —
+only the default tightened). The breaker is stateful per walk-forward window (resets at each window
+boundary), logs the trip (window id, trades taken, drawdown-at-trip), and surfaces on
+`WindowResult.circuit_breaker_tripped`. Before/after drawdown is re-rendered in
+`notebooks/08_walk_forward.ipynb` (run with `with_4h=True` so ORB actually fires on the snapshot).
+Real-data magnitudes remain **data-gated** on the 5-year TFEX backfill.
+
+---
+
 ## Market data source — the Market Data Engine
 
 > **The single most important data rule for this strategy: tfex NEVER fetches tvkit and
