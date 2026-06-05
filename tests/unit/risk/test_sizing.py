@@ -19,11 +19,27 @@ def test_multiplier_constant() -> None:
     assert Decimal("200") == S50_MULTIPLIER
 
 
+def test_default_risk_per_trade_pct_is_half_percent() -> None:
+    """The default per-trade budget is 0.5% (tightened from 1% as a risk mitigation)."""
+    assert RiskConfig().risk_per_trade_pct == 0.005
+
+
+def test_default_sizing_half_percent_is_zero_for_worked_example() -> None:
+    """Under the 0.5% default, 100k / 5-pt stop sizes to 0 contracts (was 1 at 1%)."""
+    result = compute_position_size(
+        PositionSizeRequest(equity=Decimal("100000"), stop_distance_points=Decimal("5")),
+        RiskConfig(),
+    )
+    assert result.contracts == 0
+    assert result.risk_amount == Decimal("500")
+    assert "sub-1-contract → no trade" in result.reasons
+
+
 def test_worked_example_one_contract() -> None:
     """Verbatim risk-engine.md example: 100k equity, 1% risk, 5-pt stop ⇒ exactly 1 contract."""
     result = compute_position_size(
         PositionSizeRequest(equity=Decimal("100000"), stop_distance_points=Decimal("5")),
-        RiskConfig(),
+        RiskConfig(risk_per_trade_pct=0.01),
     )
     assert result.contracts == 1
     assert result.risk_amount == Decimal("1000.00")
@@ -32,7 +48,7 @@ def test_worked_example_one_contract() -> None:
 
 def test_wider_stop_shrinks_size() -> None:
     """A wider stop yields fewer contracts (floored)."""
-    cfg = RiskConfig()
+    cfg = RiskConfig(risk_per_trade_pct=0.01)
     eq = Decimal("100000")
     # 4-pt stop: 1000 / (4*200) = 1.25 → 1 contract.
     assert (
@@ -111,7 +127,7 @@ def test_scaling_applied_in_sizing() -> None:
             rv_percentile=0.85,
             regime="trend_up",
         ),
-        RiskConfig(),
+        RiskConfig(risk_per_trade_pct=0.01),
     )
     # 2000 / (5*200) = 2.0, halved to 1.0 → 1 contract.
     assert result.contracts == 1

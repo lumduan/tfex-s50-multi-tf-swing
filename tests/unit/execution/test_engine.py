@@ -56,11 +56,16 @@ def make_signal(
     )
 
 
+# The worked numeric examples below are pinned to k_atr_stop=1.5 (the default is now 2.0, a risk
+# mitigation); they validate the stop-clamp / TP / trail math at a fixed k, not the default value.
+_K15 = ExecutionConfig(k_atr_stop=1.5)
+
+
 def test_long_stop_loss() -> None:
     bars = make_bars(
         [(100, 101, 99, 100), (100, 101, 99, 100), (99, 99, 96, 97)]  # trigger, entry, stop hit
     )
-    trade = simulate_trade(make_signal(0, "long", 98.0), bars)
+    trade = simulate_trade(make_signal(0, "long", 98.0), bars, config=_K15)
     assert trade is not None
     assert trade.exit_reason == "stop_loss"
     assert trade.entry == Decimal("100.0")
@@ -70,7 +75,7 @@ def test_long_stop_loss() -> None:
 
 
 def test_long_take_profit_full_when_partial_fraction_one() -> None:
-    config = ExecutionConfig(partial_fraction=1.0)
+    config = ExecutionConfig(partial_fraction=1.0, k_atr_stop=1.5)
     bars = make_bars([(100, 101, 99, 100), (100, 101, 99, 100), (101, 104, 100, 103)])
     trade = simulate_trade(make_signal(0, "long", 98.0), bars, config=config)
     assert trade is not None
@@ -84,7 +89,7 @@ def test_long_partial_then_trailing_stop() -> None:
     bars = make_bars(
         [(100, 101, 99, 100), (100, 101, 99, 100), (101, 104, 101, 103), (101, 101, 99, 100)]
     )
-    trade = simulate_trade(make_signal(0, "long", 98.0), bars)
+    trade = simulate_trade(make_signal(0, "long", 98.0), bars, config=_K15)
     assert trade is not None
     assert trade.exit_reason == "trailing_stop"
     # 0.5 * (103 - 100) + 0.5 * (100 - 100) = 1.5 points; r = 1.5 / 3 = 0.5
@@ -116,7 +121,7 @@ def test_short_stop_loss() -> None:
     bars = make_bars(
         [(100, 101, 99, 100), (100, 101, 99, 100), (101, 104, 101, 103)]  # entry 100, rises to stop
     )
-    trade = simulate_trade(make_signal(0, "short", 102.0), bars)
+    trade = simulate_trade(make_signal(0, "short", 102.0), bars, config=_K15)
     assert trade is not None
     assert trade.exit_reason == "stop_loss"
     assert trade.stop == Decimal("103.0")  # max(entry+1.5*atr=103, stop_ref=102)

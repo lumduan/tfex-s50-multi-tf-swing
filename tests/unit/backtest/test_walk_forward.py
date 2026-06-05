@@ -165,6 +165,67 @@ def test_drive_aggregates_returns_per_day() -> None:
 
 
 # ---------------------------------------------------------------------------
+# per-window circuit breaker — cumulative net-R floor (risk mitigation)
+# ---------------------------------------------------------------------------
+
+
+def _losers_on_distinct_days(n: int) -> list:  # type: ignore[type-arg]
+    """``n`` −1R losers, one per BKK day, so the per-day −2R limit never pre-empts the breaker."""
+    return [costed(make_trade(when=T0 + timedelta(days=i)), net_r=Decimal("-1")) for i in range(n)]
+
+
+def test_breaker_never_trips_below_floor() -> None:
+    # 4 × −1R = −4R cumulative, above the −5R floor → no trip, all taken.
+    out = drive_costed_trades(
+        _losers_on_distinct_days(4),
+        risk_config=_risk(),
+        start_equity=Decimal("200000"),
+        calendar=_cal(),
+    )
+    assert not out.breaker_tripped
+    assert len(out.taken) == 4
+    assert out.n_skipped == 0
+
+
+def test_breaker_trips_exactly_at_floor() -> None:
+    # Floor −3R, 3 × −1R lands cumulative exactly at −3R → trips on the third (all three taken).
+    out = drive_costed_trades(
+        _losers_on_distinct_days(3),
+        risk_config=_risk(per_window_loss_limit_r=-3.0),
+        start_equity=Decimal("200000"),
+        calendar=_cal(),
+    )
+    assert out.breaker_tripped
+    assert len(out.taken) == 3
+    assert out.n_skipped == 0
+
+
+def test_breaker_suppresses_every_subsequent_entry() -> None:
+    # 3 losers (trip at −3R) then 3 winners on later days — every winner is suppressed.
+    losers = _losers_on_distinct_days(3)
+    winners = [
+        costed(make_trade(when=T0 + timedelta(days=3 + i)), net_r=Decimal("1")) for i in range(3)
+    ]
+    out = drive_costed_trades(
+        losers + winners,
+        risk_config=_risk(per_window_loss_limit_r=-3.0),
+        start_equity=Decimal("200000"),
+        calendar=_cal(),
+    )
+    assert out.breaker_tripped
+    assert len(out.taken) == 3  # only the losers; winners blocked post-trip
+    assert out.n_skipped == 3
+
+
+def test_breaker_not_tripped_on_winning_run() -> None:
+    # The synthetic rising ramp yields winners → cumulative R stays positive → never trips, and the
+    # per-window flag is surfaced (False) on every window result.
+    report = _run()
+    assert report.combined.windows  # at least one window ran
+    assert not any(w.circuit_breaker_tripped for w in report.combined.windows)
+
+
+# ---------------------------------------------------------------------------
 # run_walk_forward — end-to-end on a synthetic ramp
 # ---------------------------------------------------------------------------
 
