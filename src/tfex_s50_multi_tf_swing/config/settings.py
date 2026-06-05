@@ -181,6 +181,9 @@ class Settings(BaseSettings):
     cost_illiquid_session_mult: float = Field(default=2.0, ge=1.0)
     cost_tick_size: Decimal = Field(default=Decimal("0.1"), gt=0)
     cost_spread_ticks: float = Field(default=1.0, ge=0.0)
+    # Roll-over penalty when a 1H position is held across a quarterly contract expiry.
+    cost_rollover_commission_per_contract: Decimal = Field(default=Decimal("160"), ge=0)
+    cost_rollover_spread_points: Decimal = Field(default=Decimal("2.0"), ge=0)
 
     def signal_config(self) -> SignalConfig:
         """Build a :class:`SignalConfig` from the configured signal fields (lazy import).
@@ -314,6 +317,8 @@ class Settings(BaseSettings):
             illiquid_session_mult=self.cost_illiquid_session_mult,
             tick_size=self.cost_tick_size,
             spread_ticks=self.cost_spread_ticks,
+            rollover_commission_per_contract=self.cost_rollover_commission_per_contract,
+            rollover_spread_points=self.cost_rollover_spread_points,
         )
 
     def bias_config(self) -> BiasConfig:

@@ -29,6 +29,25 @@ from tfex_s50_multi_tf_swing.signals.models import StrategyId
 
 _ZERO = Decimal(0)
 
+#: Approximate count of 1H bars in one TFEX S50-futures trading day (morning + afternoon +
+#: night sessions). Used to convert a mean ``bars_held`` into market days. An approximation —
+#: the exact bar count varies with the night-session schedule — but stable for reporting.
+TFEX_BARS_PER_TRADING_DAY = 8
+
+
+def avg_holding(trades: list[Trade]) -> tuple[float | None, float | None]:
+    """Mean holding duration as ``(hours, market_days)``.
+
+    On the 1H execution timeframe ``Trade.bars_held`` is the count of 1H bars held, i.e. the
+    market-hours of exposure (overnight closed hours are not counted, so this never inflates).
+    Market days divide that by :data:`TFEX_BARS_PER_TRADING_DAY`. Returns ``(None, None)`` when
+    there are no trades.
+    """
+    if not trades:
+        return None, None
+    mean_hours = sum(t.bars_held for t in trades) / len(trades)
+    return mean_hours, mean_hours / TFEX_BARS_PER_TRADING_DAY
+
 
 def expectancy(trades: list[Trade]) -> Decimal:
     """Mean R-multiple per trade (``0`` when there are no trades)."""
@@ -73,16 +92,19 @@ def regime_stratified(trades: list[Trade]) -> dict[Regime, RegimeMetrics]:
     for trade in trades:
         if trade.regime is not None:
             buckets[trade.regime].append(trade)
-    return {
-        regime: RegimeMetrics(
+    result: dict[Regime, RegimeMetrics] = {}
+    for regime, group in buckets.items():
+        hours, market_days = avg_holding(group)
+        result[regime] = RegimeMetrics(
             regime=regime,
             n_trades=len(group),
             expectancy_r=expectancy(group),
             profit_factor=profit_factor(group),
             win_rate=win_rate(group),
+            avg_holding_hours=hours,
+            avg_holding_market_days=market_days,
         )
-        for regime, group in buckets.items()
-    }
+    return result
 
 
 def drawdown_profile(trades: list[Trade]) -> DrawdownProfile:
@@ -178,6 +200,7 @@ def compute_metrics(
     trades: list[Trade], *, strategy_id: StrategyId | None = None
 ) -> BacktestMetrics:
     """Assemble the full :class:`BacktestMetrics` report (empty-safe)."""
+    hours, market_days = avg_holding(trades)
     return BacktestMetrics(
         strategy_id=strategy_id,
         n_trades=len(trades),
@@ -186,10 +209,14 @@ def compute_metrics(
         max_drawdown_r=max_drawdown(trades),
         win_rate=win_rate(trades),
         per_regime=regime_stratified(trades),
+        avg_holding_hours=hours,
+        avg_holding_market_days=market_days,
     )
 
 
 __all__: list[str] = [
+    "TFEX_BARS_PER_TRADING_DAY",
+    "avg_holding",
     "compute_metrics",
     "drawdown_profile",
     "expectancy",

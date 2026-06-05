@@ -73,6 +73,8 @@ def _window_to_dict(wr: WindowResult) -> dict[str, object]:
         "recovery_trades": wr.drawdown.recovery_trades,
         "sharpe": wr.ratios.sharpe,
         "sortino": wr.ratios.sortino,
+        "avg_holding_hours": wr.metrics.avg_holding_hours,
+        "avg_holding_market_days": wr.metrics.avg_holding_market_days,
         "nav_index": wr.nav_index,
         "circuit_breaker_tripped": wr.circuit_breaker_tripped,
     }
@@ -93,6 +95,8 @@ def _result_to_dict(result: WalkForwardResult) -> dict[str, object]:
         "win_rate": float(result.overall.win_rate),
         "sharpe": result.ratios.sharpe,
         "sortino": result.ratios.sortino,
+        "avg_holding_hours": result.overall.avg_holding_hours,
+        "avg_holding_market_days": result.overall.avg_holding_market_days,
         "regime_concentration": {
             "dominant_regime": conc.dominant_regime,
             "share": conc.share,

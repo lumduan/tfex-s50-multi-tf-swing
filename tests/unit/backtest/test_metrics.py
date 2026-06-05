@@ -6,6 +6,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from tfex_s50_multi_tf_swing.backtest.metrics import (
+    TFEX_BARS_PER_TRADING_DAY,
+    avg_holding,
     compute_metrics,
     expectancy,
     max_drawdown,
@@ -19,7 +21,7 @@ from tfex_s50_multi_tf_swing.regime.models import Regime
 _T0 = datetime(2026, 1, 5, 3, 0, tzinfo=UTC)
 
 
-def make_trade(r: str, *, regime: Regime | None = None, i: int = 0) -> Trade:
+def make_trade(r: str, *, regime: Regime | None = None, i: int = 0, bars: int = 1) -> Trade:
     r_dec = Decimal(r)
     return Trade(
         strategy_id="A",
@@ -31,7 +33,7 @@ def make_trade(r: str, *, regime: Regime | None = None, i: int = 0) -> Trade:
         exit_price=Decimal("100") + r_dec * Decimal("3"),
         pnl_points=r_dec * Decimal("3"),
         r_multiple=r_dec,
-        bars_held=1,
+        bars_held=bars,
         exit_reason="take_profit" if r_dec > 0 else "stop_loss",
         regime=regime,
     )
@@ -104,3 +106,24 @@ def test_compute_metrics_empty_safe() -> None:
     assert metrics.max_drawdown_r == Decimal(0)
     assert metrics.win_rate == Decimal(0)
     assert metrics.per_regime == {}
+    assert metrics.avg_holding_hours is None
+    assert metrics.avg_holding_market_days is None
+
+
+def test_avg_holding_from_bars_held() -> None:
+    # bars_held 4 and 12 (1H bars ⇒ market hours) ⇒ mean 8 hours = 1 market day.
+    hours, market_days = avg_holding([make_trade("1", bars=4), make_trade("-1", bars=12)])
+    assert hours == 8.0
+    assert market_days == 8.0 / TFEX_BARS_PER_TRADING_DAY
+
+
+def test_avg_holding_empty_is_none() -> None:
+    assert avg_holding([]) == (None, None)
+
+
+def test_compute_metrics_includes_holding_duration() -> None:
+    metrics = compute_metrics([make_trade("1", regime="trend_up", bars=16)], strategy_id="B")
+    assert metrics.avg_holding_hours == 16.0
+    assert metrics.avg_holding_market_days == 16.0 / TFEX_BARS_PER_TRADING_DAY
+    # The per-regime slice carries the same duration fields.
+    assert metrics.per_regime["trend_up"].avg_holding_hours == 16.0

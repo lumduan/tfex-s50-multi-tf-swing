@@ -8,6 +8,7 @@ from decimal import Decimal
 from tfex_s50_multi_tf_swing.backtest.costs import (
     CostModel,
     apply_costs,
+    crosses_quarterly_expiry,
     is_illiquid_session,
 )
 from tfex_s50_multi_tf_swing.data.session import SessionCalendar
@@ -74,3 +75,49 @@ def test_is_illiquid_session_flags_night_and_lunch() -> None:
     assert is_illiquid_session(cal, night) is True
     assert is_illiquid_session(cal, lunch) is True
     assert is_illiquid_session(cal, morning) is False
+
+
+# --- Roll-over costs (a 1H position held across a quarterly contract expiry) ---
+
+
+def test_crosses_quarterly_expiry_true_across_boundary() -> None:
+    cal = SessionCalendar()
+    # June (M) 2026 expiry is the last business day of June; entering mid-June and exiting in
+    # July spans it.
+    entry = datetime(2026, 6, 15, 3, 0, tzinfo=UTC)
+    exit_ = datetime(2026, 7, 2, 3, 0, tzinfo=UTC)
+    assert crosses_quarterly_expiry(entry, exit_, cal) is True
+
+
+def test_crosses_quarterly_expiry_false_within_quarter() -> None:
+    cal = SessionCalendar()
+    # A short hold entirely inside a single quarter (mid-Jan → mid-Feb) crosses no expiry.
+    entry = datetime(2026, 1, 15, 3, 0, tzinfo=UTC)
+    exit_ = datetime(2026, 2, 15, 3, 0, tzinfo=UTC)
+    assert crosses_quarterly_expiry(entry, exit_, cal) is False
+
+
+def test_crosses_quarterly_expiry_false_same_day() -> None:
+    cal = SessionCalendar()
+    intraday_entry = datetime(2026, 1, 5, 3, 0, tzinfo=UTC)
+    intraday_exit = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
+    assert crosses_quarterly_expiry(intraday_entry, intraday_exit, cal) is False
+
+
+def test_rollover_cost_added_when_crossing() -> None:
+    trade = make_trade(r=Decimal("1"))
+    base = apply_costs(trade, atr_at_entry=2.0, illiquid=False, config=CostModel())
+    rolled = apply_costs(
+        trade, atr_at_entry=2.0, illiquid=False, config=CostModel(), crosses_rollover=True
+    )
+    expected_rollover = Decimal("160") / S50_MULTIPLIER + Decimal("2.0")
+    assert rolled.rollover_cost_points == expected_rollover
+    assert rolled.cost_points == base.cost_points + expected_rollover
+    assert rolled.net_pnl_points == base.net_pnl_points - expected_rollover
+    assert rolled.net_r_multiple < base.net_r_multiple
+
+
+def test_no_rollover_cost_by_default() -> None:
+    trade = make_trade()
+    out = apply_costs(trade, atr_at_entry=2.0, illiquid=False, config=CostModel())
+    assert out.rollover_cost_points == Decimal("0")

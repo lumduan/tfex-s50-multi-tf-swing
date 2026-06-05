@@ -35,6 +35,10 @@ class RegimeMetrics(BaseModel):
     expectancy_r: Decimal
     profit_factor: Decimal | None = None
     win_rate: Decimal = Field(ge=0, le=1)
+    # Average holding duration: mean ``bars_held`` (1H bars ⇒ market hours of exposure) and the
+    # same converted to market days. ``None`` when the regime slice has no trades.
+    avg_holding_hours: float | None = None
+    avg_holding_market_days: float | None = None
 
 
 class BacktestMetrics(BaseModel):
@@ -49,6 +53,10 @@ class BacktestMetrics(BaseModel):
     max_drawdown_r: Decimal = Field(ge=0)
     win_rate: Decimal = Field(ge=0, le=1)
     per_regime: dict[Regime, RegimeMetrics] = Field(default_factory=dict)
+    # Average holding duration: mean ``bars_held`` (1H bars ⇒ market hours of exposure) and the
+    # same converted to market days. ``None`` when there are no trades.
+    avg_holding_hours: float | None = None
+    avg_holding_market_days: float | None = None
 
 
 # ---------------------------------------------------------------------------
