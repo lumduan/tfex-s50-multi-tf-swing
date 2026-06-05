@@ -73,11 +73,14 @@ class SignalConfig(BaseModel):
     require_structure_shift: bool = True
     # Lookback (in 1H bars) for the causal swing high/low used as the structure stop anchor.
     swing_window: int = Field(default=4, ge=2)
-    # Risk-mitigation entry gate (applied by ``signals.gate.apply_regime_gate``): a fired bar only
-    # survives when its **1D regime** is in this allow-set. Defaults to ``trend_up`` only (61.7% of
-    # the historical edge); ``range_low_vol`` / ``panic`` are already policy no-trade regimes, so
-    # adding them is a documented no-op today.
+    # Directional entry gate (applied by ``signals.gate.apply_regime_gate``). ``allowed_regimes`` is
+    # the **long** allow-set: a fired LONG bar survives only when its **1D regime** is in it.
+    # Defaults to ``trend_up`` only (61.7% of the historical edge).
     allowed_regimes: frozenset[Regime] = frozenset({"trend_up"})
+    # The **short** allow-set: a fired SHORT bar survives only when its 1D regime is in it. Default
+    # empty ⇒ shorts blocked (long-only, backward-compatible). Set to ``{"trend_down"}`` to capture
+    # downside alpha in bear regimes (dual-direction hedging of the long-only macro book).
+    short_allowed_regimes: frozenset[Regime] = frozenset()
 
 
 class SetupSignal(BaseModel):

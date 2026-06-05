@@ -37,6 +37,21 @@ def test_allowed_regimes_rejects_unknown_regime() -> None:
         Settings(signal_allowed_regimes="trend_up,bull_market")
 
 
+def test_short_allowed_regimes_default_is_empty() -> None:
+    # Default: long-only (no short regimes), backward-compatible.
+    assert Settings().signal_config().short_allowed_regimes == frozenset()
+
+
+def test_short_allowed_regimes_parses_trend_down() -> None:
+    cfg = Settings(signal_short_allowed_regimes="trend_down").signal_config()
+    assert cfg.short_allowed_regimes == frozenset({"trend_down"})
+
+
+def test_short_allowed_regimes_rejects_unknown_regime() -> None:
+    with pytest.raises(ValidationError):
+        Settings(signal_short_allowed_regimes="trend_down,moon")
+
+
 def test_per_window_loss_limit_default_and_wiring() -> None:
     assert Settings().risk_config().per_window_loss_limit_r == -5.0
 

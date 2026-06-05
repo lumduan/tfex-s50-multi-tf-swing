@@ -189,7 +189,8 @@ def _run(args: argparse.Namespace) -> int:
     detect = build_detect_map(
         sig_cfg,
         enabled=settings.enabled_strategy_ids(),
-        allowed_regimes=sig_cfg.allowed_regimes,
+        long_regimes=sig_cfg.allowed_regimes,
+        short_regimes=sig_cfg.short_allowed_regimes,
     )
 
     risk_config, ladder_evidence = _backtest_risk(settings.risk_config())

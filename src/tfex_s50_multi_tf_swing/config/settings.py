@@ -117,10 +117,13 @@ class Settings(BaseSettings):
     # ``enabled_strategies`` is the comma-separated set of strategy ids the detect map activates
     # (default ``B`` — ORB-only core; Strategy C, the 31.13R-drawdown driver, and the
     # negative-expectancy Strategy A are disabled-by-default but re-enablable with no code edit,
-    # e.g. ``A,B,C``). ``signal_allowed_regimes`` is the comma-separated 1H-regime allow-set the
-    # gate permits entries in (default ``trend_up`` only). Both are validated at load.
+    # e.g. ``A,B,C``). ``signal_allowed_regimes`` is the comma-separated 1D-regime allow-set for
+    # **long** entries (default ``trend_up`` only); ``signal_short_allowed_regimes`` is the
+    # allow-set for **short** entries (default empty ⇒ long-only; set ``trend_down`` for
+    # dual-direction hedging). All are validated at load.
     enabled_strategies: str = "B"
     signal_allowed_regimes: str = "trend_up"
+    signal_short_allowed_regimes: str = ""
 
     # Phase 5 — execution-engine knobs. Bounds mirror ``execution.ExecutionConfig``.
     # ``execution_k_atr_stop`` default widened 1.5 → 2.0 (risk mitigation: wider noise buffer).
@@ -188,8 +191,9 @@ class Settings(BaseSettings):
     def signal_config(self) -> SignalConfig:
         """Build a :class:`SignalConfig` from the configured signal fields (lazy import).
 
-        ``signal_allowed_regimes`` (a comma-separated string, validated at load) is parsed into the
-        ``allowed_regimes`` frozenset the entry gate (``signals.gate.apply_regime_gate``) consumes.
+        ``signal_allowed_regimes`` / ``signal_short_allowed_regimes`` (comma-separated strings,
+        validated at load) are parsed into the long / short ``allowed_regimes`` frozensets the
+        directional entry gate (``signals.gate.apply_regime_gate``) consumes.
         """
         from tfex_s50_multi_tf_swing.regime.models import Regime
         from tfex_s50_multi_tf_swing.signals.models import SignalConfig
@@ -197,6 +201,11 @@ class Settings(BaseSettings):
         allowed_regimes = frozenset(
             cast(Regime, token.strip())
             for token in self.signal_allowed_regimes.split(",")
+            if token.strip()
+        )
+        short_allowed_regimes = frozenset(
+            cast(Regime, token.strip())
+            for token in self.signal_short_allowed_regimes.split(",")
             if token.strip()
         )
         return SignalConfig(
@@ -210,6 +219,7 @@ class Settings(BaseSettings):
             require_structure_shift=self.signal_require_structure_shift,
             swing_window=self.signal_swing_window,
             allowed_regimes=allowed_regimes,
+            short_allowed_regimes=short_allowed_regimes,
         )
 
     def enabled_strategy_ids(self) -> frozenset[StrategyId]:
@@ -374,17 +384,17 @@ class Settings(BaseSettings):
             )
         return value
 
-    @field_validator("signal_allowed_regimes")
+    @field_validator("signal_allowed_regimes", "signal_short_allowed_regimes")
     @classmethod
     def _validate_signal_allowed_regimes(cls, value: str) -> str:
-        """Reject an unknown regime at load time (the allow-set must be ⊆ ``REGIMES``)."""
+        """Reject an unknown regime at load time (each allow-set must be ⊆ ``REGIMES``)."""
         from tfex_s50_multi_tf_swing.regime.models import REGIMES
 
         tokens = [token.strip() for token in value.split(",") if token.strip()]
         invalid = sorted({token for token in tokens if token not in REGIMES})
         if invalid:
             raise ValueError(
-                f"signal_allowed_regimes has unknown regimes {invalid}; expected ⊆ {list(REGIMES)}"
+                f"allowed-regimes field has unknown regimes {invalid}; expected ⊆ {list(REGIMES)}"
             )
         return value
 
