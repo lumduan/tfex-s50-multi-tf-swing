@@ -188,6 +188,44 @@ class Settings(BaseSettings):
     cost_rollover_commission_per_contract: Decimal = Field(default=Decimal("160"), ge=0)
     cost_rollover_spread_points: Decimal = Field(default=Decimal("2.0"), ge=0)
 
+    # Phase 5.1 — strategy execution path (feature-execution-engine). A library-only,
+    # opt-in sim trade loop: signal → NormalizedOrder → POST /orders (gateway proxy) →
+    # SSE fill events → local SimPosition. No broker code lives here; the Execution
+    # engine is the sole order-routing-credential owner. Default 'off' adds no required
+    # env (module-level ``Settings()`` keeps constructing).
+    execution_mode: str = Field(
+        default="off",
+        description=(
+            "Strategy execution path (feature-execution-engine Phase 5.1). "
+            "'off' (default) — no execution: the engine adapter is never "
+            "instantiated and no order HTTP is performed. 'sim' — submit "
+            "NormalizedOrders through the gateway proxy to the Execution engine "
+            "SimAdapter and apply SSE fill events to a local sim position. "
+            "'live' — RESERVED: forbidden when TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE=true "
+            "and unimplemented in Phase 5.1. Modes other than 'off' require "
+            "TFEX_S50_MULTI_TF_SWING_GATEWAY_BASE_URL, "
+            "TFEX_S50_MULTI_TF_SWING_GATEWAY_API_KEY, and "
+            "TFEX_S50_MULTI_TF_SWING_EXECUTION_ACCOUNT."
+        ),
+    )
+    execution_account: str | None = Field(
+        default=None,
+        description=(
+            "Broker account identifier stamped on every NormalizedOrder "
+            "(NormalizedOrder.account is required). Required when "
+            "TFEX_S50_MULTI_TF_SWING_EXECUTION_MODE != 'off'; ignored when 'off'."
+        ),
+    )
+    execution_broker: str = Field(
+        default="sim",
+        description=(
+            "Target broker for execution: 'sim' (default), 'liberator', or "
+            "'settrade'. In 'sim' mode this is always 'sim'. The 'live' mode "
+            "sources the real venue from this field, so 'live' + 'sim' is "
+            "rejected."
+        ),
+    )
+
     def signal_config(self) -> SignalConfig:
         """Build a :class:`SignalConfig` from the configured signal fields (lazy import).
 
@@ -398,6 +436,24 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("execution_mode")
+    @classmethod
+    def _validate_execution_mode(cls, value: str) -> str:
+        """Reject an unknown execution mode at load time."""
+        allowed: set[str] = {"off", "sim", "live"}
+        if value not in allowed:
+            raise ValueError(f"execution_mode must be one of {sorted(allowed)!r}, got {value!r}")
+        return value
+
+    @field_validator("execution_broker")
+    @classmethod
+    def _validate_execution_broker(cls, value: str) -> str:
+        """Reject an unknown execution broker at load time."""
+        allowed: set[str] = {"sim", "liberator", "settrade"}
+        if value not in allowed:
+            raise ValueError(f"execution_broker must be one of {sorted(allowed)!r}, got {value!r}")
+        return value
+
     @model_validator(mode="after")
     def _require_engine_url_for_engine_source(self) -> Self:
         """Fail fast if ``ohlcv_source='engine'`` without a Market Data Engine URL."""
@@ -408,6 +464,50 @@ class Settings(BaseSettings):
                 "http://quant-api-gateway:8000/api/v2/engines/market-data "
                 "in-cluster or http://localhost:8080/api/v2/engines/market-data "
                 "for host-local dev)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_execution_path(self) -> Self:
+        """Fail fast on an inconsistent execution configuration.
+
+        ``execution_mode='off'`` (the default) requires no execution env and is
+        always valid. Any other mode requires the gateway URL/key plus a broker
+        account, and ``'live'`` is forbidden in public mode (public mode defaults
+        ``True`` here, so ``'sim'`` is always allowed under it; only ``'live'`` is
+        rejected) and is incompatible with the ``'sim'`` broker.
+        """
+        if self.execution_mode == "off":
+            return self
+        if self.execution_mode == "live" and self.public_mode:
+            raise ValueError(
+                "TFEX_S50_MULTI_TF_SWING_EXECUTION_MODE='live' is forbidden when "
+                "TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE=true (public mode is read-only; "
+                "no live order routing)."
+            )
+        if not self.gateway_base_url:
+            raise ValueError(
+                "TFEX_S50_MULTI_TF_SWING_GATEWAY_BASE_URL is required when "
+                "TFEX_S50_MULTI_TF_SWING_EXECUTION_MODE != 'off' (the order path "
+                "posts through the gateway, e.g. http://quant-api-gateway:8000)."
+            )
+        if not self.gateway_api_key.get_secret_value():
+            raise ValueError(
+                "TFEX_S50_MULTI_TF_SWING_GATEWAY_API_KEY is required when "
+                "TFEX_S50_MULTI_TF_SWING_EXECUTION_MODE != 'off' (presented as the "
+                "X-API-Key header on every order request)."
+            )
+        if not self.execution_account:
+            raise ValueError(
+                "TFEX_S50_MULTI_TF_SWING_EXECUTION_ACCOUNT is required when "
+                "TFEX_S50_MULTI_TF_SWING_EXECUTION_MODE != 'off' "
+                "(NormalizedOrder.account is mandatory)."
+            )
+        if self.execution_mode == "live" and self.execution_broker == "sim":
+            raise ValueError(
+                "TFEX_S50_MULTI_TF_SWING_EXECUTION_BROKER must be a real venue "
+                "('liberator' or 'settrade') when "
+                "TFEX_S50_MULTI_TF_SWING_EXECUTION_MODE='live'; got 'sim'."
             )
         return self
 
