@@ -452,6 +452,70 @@ risk without any gateway-contract or public/owner-mode change (all reversible vi
 `notebooks/08_walk_forward.ipynb` re-renders the before/after walk-forward (run with `with_4h=True`
 so ORB fires on the local snapshot). Real-data magnitudes stay **data-gated** on the 5-year backfill.
 
+### Execution mode (`TFEX_S50_MULTI_TF_SWING_EXECUTION_MODE`)
+
+The optional execution path (feature-execution-engine Phase 5.1) is gated by
+`TFEX_S50_MULTI_TF_SWING_EXECUTION_MODE`. It is a **library + verify-script only**
+facility — it is **not** wired into any runner, the daily refresh, or the
+backtest/risk path; nothing routes an order unless you call
+`tfex_s50_multi_tf_swing.execution.run_sim_loop` (or the verify script) explicitly.
+
+- **`off`** (default): zero-code path. The engine adapter is never instantiated and
+  no order HTTP is performed. Adds no required env (module-level `Settings()` keeps
+  constructing).
+- **`sim`**: submit `NormalizedOrder`s through the **gateway proxy**
+  (`/api/v2/engines/execution/*`) to the Execution engine `SimAdapter`, then apply
+  the SSE fill stream (`GET /orders/stream`) to a local, evolving `SimPosition`.
+  Requires `TFEX_S50_MULTI_TF_SWING_GATEWAY_BASE_URL`,
+  `TFEX_S50_MULTI_TF_SWING_GATEWAY_API_KEY` (both reused from the daily-report
+  path), and `TFEX_S50_MULTI_TF_SWING_EXECUTION_ACCOUNT`. **`public_mode` defaults
+  `True` here, and `sim` is allowed under it** — only `live` is forbidden in public
+  mode.
+- **`live`**: RESERVED. Rejected at `Settings()` when
+  `TFEX_S50_MULTI_TF_SWING_PUBLIC_MODE=true`, and unimplemented in Phase 5.1
+  (`run_sim_loop` only runs `sim`). When enabled it would source the real venue from
+  `TFEX_S50_MULTI_TF_SWING_EXECUTION_BROKER` (so `live` + broker `sim` is rejected).
+
+Supporting env:
+
+- `TFEX_S50_MULTI_TF_SWING_EXECUTION_ACCOUNT` — broker account stamped on every
+  order (`NormalizedOrder.account` is mandatory); required when mode != `off`.
+- `TFEX_S50_MULTI_TF_SWING_EXECUTION_BROKER` — `sim` (default) | `liberator` |
+  `settrade`.
+
+**TFEX specifics:**
+
+- **`position_effect` is required** on every order — the engine rejects a TFEX
+  order without it, so the loop never sends `None`. `NormalizedOrder` pins
+  `market="TFEX"` and `wire_dump()` always emits both `market` and
+  `position_effect`. (Contrast SET / csm-set, which omits `position_effect`.)
+- **`infer_position_effect`** computes OPEN vs CLOSE at submit time against the
+  *evolving* position: no position or **same** direction → `OPEN`; **opposite**
+  direction with `contracts <= held` → `CLOSE`; an oversize opposite order is a
+  **flip, which is unsupported in Phase 5.1** → `SimLoopError`.
+- Sizing is in **whole S50 contracts** (integers) and happens **upstream** (the
+  risk engine's `PositionSizeResult`); the loop consumes pre-built
+  `OrderInstruction`s and never sizes. Instructions are processed **sequentially**
+  against the evolving position, so an entry-then-exit pair in one run exercises
+  OPEN then CLOSE. `side` is BUY for `long`, SELL for `short`. The S50 book is
+  single-direction; a flat book is `None`.
+
+No broker credential ever lives in this repo — the Execution engine is the sole
+order-routing-credential owner; tfex only ever posts a normalized order through the
+gateway. The loop is single-source (positions move only from stream `fill` events,
+never from the POST ack), uses a fresh UUIDv4 `client_order_id` per logical order
+(the same id is reused only on transport/5xx retries), a client-side seq watermark
+for reconnect dedupe, and a `GET /orders/{cid}` residual reconcile on timeout or
+stream reset.
+
+Module locations: `src/tfex_s50_multi_tf_swing/execution/models.py` (wire mirrors +
+value objects), `engine_adapter.py` (HTTP/SSE client), `sim_loop.py` (the loop),
+`errors.py` (typed exceptions, rooted at the existing `ExecutionError`). Manual
+end-to-end check (entry then exit in one invocation):
+`uv run python scripts/verify_execution_sim.py --symbol S50Z2026 --contracts 1 --price 970.0`
+(needs `TFEX_S50_MULTI_TF_SWING_EXECUTION_MODE=sim` + the gateway env above). See
+`.claude/knowledge/execution-mode.md`.
+
 ### Public data boundary
 
 Raw OHLCV columns (`open`, `high`, `low`, `close`, `volume`) and proprietary feature
