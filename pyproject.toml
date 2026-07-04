@@ -39,6 +39,12 @@ dev = [
     "respx>=0.21",
     "bandit>=1.7",
     "pip-audit>=2.7",
+]
+notebooks = [
+    # Notebook / research toolchain — deliberately kept OUT of the audited runtime tree (heavy
+    # transitive CVE surface: bleach / jupyter-server / jupyterlab / tornado). Not imported by
+    # src/ (research-only, notebooks/). Opt-in via `uv sync --group notebooks`; excluded from the
+    # pip-audit scope in .github/workflows/security.yml (which syncs default groups only).
     "jupyter>=1.1.1",
     "nbconvert>=7.17.1",
     "ipykernel>=7.2.0",
