@@ -2,6 +2,10 @@ services:
   tfex:
     build: .
     container_name: quant-tfex-s50-multi-tf-swing
+    # PID-1 reaper (tini): uvicorn runs as PID 1 and does not wait() on
+    # children, so SIGKILLed healthcheck `curl` processes pile up as <defunct>
+    # zombies. `init: true` makes Docker inject tini as PID 1 to reap them.
+    init: true
     ports:
       - "8200:8000"
     environment:
