@@ -3,7 +3,7 @@
 ROADMAP §1.3 sessions (Asia/Bangkok, UTC+7, no DST):
 
 * Morning   09:45 – 12:30
-* Afternoon 14:30 – 16:55
+* Afternoon 13:45 – 16:55
 * Night     18:45 – 03:00 (crosses midnight; bars labelled by *start* day)
 
 The lunch dead zone 12:00 – 14:00 BKK is a **no-trade regime**
@@ -31,7 +31,16 @@ BKK: Final[timezone] = timezone(timedelta(hours=7))
 # that as 1620 (= 27:00, i.e. 03:00 next day).
 SESSION_BOUNDS_BKK: Final[dict[str, tuple[int, int]]] = {
     "morning": (9 * 60 + 45, 12 * 60 + 30),  # 09:45 – 12:30
-    "afternoon": (14 * 60 + 30, 16 * 60 + 55),  # 14:30 – 16:55
+    # 🔴 CORRECTED 2026-08-26: was 14:30, which is WRONG for TFEX equity and had been reported
+    # three times. TFEX ⓐ EQUITY (S50 · Sector · SSF) breaks 12:30–13:45 and resumes CONTINUOUS II
+    # at 13:45; afternoon pre-open is 13:15–13:45. 14:30 is not a TFEX boundary at all.
+    #
+    # ⚠️ THIS IS A FEATURE DEFINITION, not just a trading gate. It is read by
+    # features/time_of_day.py (session columns) and data/validator.py (the EXPECTED bar grid),
+    # so `data/features/*.parquet` — built 2026-06-04/05 under the OLD bound — encode the old
+    # session and were deliberately NOT regenerated. Do not compare feature values across this
+    # change without rebuilding them first.
+    "afternoon": (13 * 60 + 45, 16 * 60 + 55),  # 13:45 – 16:55
     "night": (18 * 60 + 45, 27 * 60 + 0),  # 18:45 – next-day 03:00
 }
 
@@ -157,7 +166,7 @@ class SessionCalendar:
 
         Names: ``morning`` / ``afternoon`` / ``night`` are open trading
         sessions; ``lunch`` is the closed gap between morning end and
-        afternoon start (12:30–14:30 BKK); ``closed`` is everything else
+        afternoon start (12:30–13:45 BKK); ``closed`` is everything else
         (overnight gap, pre-open, and any non-business day).
         """
         bkk_dt = _to_bkk(dt)

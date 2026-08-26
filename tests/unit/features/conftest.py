@@ -110,10 +110,10 @@ def intraday_5m(*, days: int = 12, base: float = 800.0) -> pl.DataFrame:
 
 
 def _session_minutes() -> list[int]:
-    """BKK minute-of-day for morning (09:45–12:30) and afternoon (14:30–16:55) 5m bars."""
+    """BKK minute-of-day for morning (09:45–12:30) and afternoon (13:45–16:55) 5m bars."""
     minutes: list[int] = []
     minutes.extend(range(9 * 60 + 45, 12 * 60 + 30, 5))
-    minutes.extend(range(14 * 60 + 30, 16 * 60 + 55, 5))
+    minutes.extend(range(13 * 60 + 45, 16 * 60 + 55, 5))
     return minutes
 
 

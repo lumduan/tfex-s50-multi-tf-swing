@@ -54,8 +54,10 @@ def test_is_business_day_normal(cal: SessionCalendar) -> None:
         (12, 29, "morning"),  # 1 minute before close
         (12, 30, "lunch"),  # exactly at close
         (13, 30, "lunch"),
-        (14, 29, "lunch"),  # 1 minute before afternoon
-        (14, 30, "afternoon"),
+        (13, 44, "lunch"),  # 1 minute before afternoon — TFEX resumes 13:45, NOT 14:30
+        (13, 45, "afternoon"),  # exactly at the afternoon reopen
+        (14, 29, "afternoon"),  # was asserted as "lunch" until 2026-08-26; it is mid-session
+        (14, 30, "afternoon"),  # 14:30 is not a boundary at all — kept so a regression is caught
         (16, 54, "afternoon"),
         (16, 55, "closed"),  # exactly at afternoon close
         (18, 44, "closed"),
@@ -124,7 +126,9 @@ def test_lunch_dead_zone(cal: SessionCalendar) -> None:
         (10, 15, "mid-morning"),  # 30 min in
         (12, 29, "mid-morning"),
         (12, 30, "lunch"),
-        (14, 29, "lunch"),
+        (13, 44, "lunch"),  # TFEX afternoon reopen is 13:45
+        (13, 45, "afternoon"),
+        (14, 29, "afternoon"),  # was "lunch" until 2026-08-26
         (14, 30, "afternoon"),
         (16, 39, "afternoon"),  # 15 min before close
         (16, 40, "pre-close"),
