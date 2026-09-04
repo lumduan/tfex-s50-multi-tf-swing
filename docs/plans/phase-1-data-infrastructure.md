@@ -262,7 +262,19 @@ Pytest is configured with `asyncio_mode = "auto"` and
 
 ### Unit tests (`tests/unit/data/`)
 
-* `test_session.py` — session boundary minutes (09:45 / 12:30 / 14:30 / 16:55 / 18:45 / 03:00 BKK), holiday lookup, lunch dead-zone, expiry/rollover-week flags, time-of-day buckets, tz handling (UTC + non-BKK).
+* `test_session.py` — session boundary minutes (09:45 / 12:30 / **13:45** / 16:55 / 18:50 / 03:00 BKK), holiday lookup, lunch dead-zone, expiry/rollover-week flags, time-of-day buckets, tz handling (UTC + non-BKK).
+  🔴 **CORRECTED 2026-09-04 — this line listed `14:30`, which is not a TFEX boundary at all.** The
+  CODE and the TESTS were already right: `data/session.py` was corrected 2026-08-26, and
+  `test_session.py` asserts `(13, 44, "lunch")` and deliberately keeps `(14, 30, "afternoon")` as a
+  regression guard. **Only this doc still asserted the retired value** — a stale description of
+  already-corrected behaviour, which is the more misleading of the two failure modes because the
+  code looks like it agrees.
+  Venue-sourced (TFEX contract specs, fetched 2026-09-04): ⓐ equity/index incl. **S50** —
+  09:45–12:30, dark **12:30–13:15**, pre-open 13:15–13:45, **13:45**–16:55, **no night session**;
+  ⓑ currency (USD) — same day pattern plus night pre-open 18:45–18:50 and **18:50**–03:00 (T+1).
+  ⚠️ **Fetch session times from the venue; do not cite them from a document.** This `14:30` has now
+  been corrected in at least five places (`ec12cba` fixed three and missed one, which survived 65
+  days in `quant-monitor`).
 * `test_contracts.py` — H/M/U/Z calendar, last-business-day expiry resolution (with Thai holidays), TradingView symbol helpers, `S501!` constant, parser rejects malformed codes.
 * `test_store.py` — Parquet round-trip preserves Decimal precision + UTC tz, schema enforcement, deduplication, ValidationReport JSON round-trip.
 * `test_validator.py` — duplicate detection, missing-bar detection within the observed window, abnormal-spread σ flag, cross-timeframe consistency (5m → 1H), `validate_continuous_against_reference` shape + flagging.
